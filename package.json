@@ -18,6 +18,7 @@
   "dependencies": {
     "lowdb": "^7.0.1",
     "pinia": "^2.1.7",
+    "sql.js": "^1.14.1",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0"
   },
