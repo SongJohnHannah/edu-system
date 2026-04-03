@@ -1,5 +1,7 @@
 // SQLite 数据库模块 - 使用 sql.js
 import initSqlJs from 'sql.js'
+// 导入 WASM 文件 URL（Vite 会正确处理）
+import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 
 let db = null
 let SQL = null
@@ -12,9 +14,9 @@ export async function initDatabase() {
   if (db) return db
 
   try {
-    // 使用 CDN 加载 sql.js WASM 文件
+    // 使用 Vite 导入的 WASM 文件 URL
     SQL = await initSqlJs({
-      locateFile: file => `https://sql.js.org/dist/${file}`
+      locateFile: () => sqlWasmUrl
     })
   } catch (error) {
     console.error('Failed to load SQL.js:', error)
