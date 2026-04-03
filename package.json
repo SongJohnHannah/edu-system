@@ -36,6 +36,8 @@
     },
     "mac": {
       "category": "public.app-category.education",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
       "target": [
         {
           "target": "dmg",

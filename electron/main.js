@@ -38,14 +38,20 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      webSecurity: false
     },
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: 'left'
   })
 
+  // 开发工具（调试用，生产环境可注释）
+  // win.webContents.openDevTools()
+
   // 加载 Vite 构建后的文件
-  win.loadFile(path.join(__dirname, '../dist/index.html'))
+  win.loadFile(path.join(__dirname, '../dist/index.html')).catch(err => {
+    console.error('Failed to load index.html:', err)
+  })
 
   // 在新窗口中打开外部链接
   win.webContents.setWindowOpenHandler(({ url }) => {
