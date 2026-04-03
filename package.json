@@ -5,7 +5,7 @@
   "description": "教务管理系统 - 小型培训机构教务管理工具",
   "author": "EduSystem",
   "type": "module",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
