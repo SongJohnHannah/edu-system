@@ -508,17 +508,26 @@ export function importData(jsonString) {
 }
 
 export function downloadBackup() {
-  const jsonStr = exportData()
-  const blob = new Blob([jsonStr], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  const timestamp = new Date().toISOString().slice(0, 10)
-  a.href = url
-  a.download = `教务系统备份_${timestamp}.json`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  try {
+    console.log('开始导出数据...')
+    const jsonStr = exportData()
+    console.log('导出数据大小:', jsonStr.length, '字节')
+
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const timestamp = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `教务系统备份_${timestamp}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    console.log('导出完成')
+  } catch (error) {
+    console.error('导出失败:', error)
+    alert('导出失败: ' + error.message)
+  }
 }
 
 export async function getStorePath() {
