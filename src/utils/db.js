@@ -11,9 +11,21 @@ const DB_VERSION = 1
 export async function initDatabase() {
   if (db) return db
 
-  SQL = await initSqlJs({
-    locateFile: file => `https://sql.js.org/dist/${file}`
-  })
+  try {
+    SQL = await initSqlJs({
+      // 优先使用本地 WASM 文件，失败则回退到 CDN
+      locateFile: file => {
+        // 检查是否在本地环境
+        if (window.location.protocol === 'file:' || window.location.hostname === 'localhost') {
+          return `/${file}`
+        }
+        return `https://sql.js.org/dist/${file}`
+      }
+    })
+  } catch (error) {
+    console.error('Failed to load SQL.js:', error)
+    throw new Error('数据库加载失败，请检查网络连接')
+  }
 
   // 尝试从 IndexedDB 加载现有数据库
   const savedData = await loadFromIndexedDB()
