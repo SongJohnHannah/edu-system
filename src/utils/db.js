@@ -1,7 +1,5 @@
 // SQLite 数据库模块 - 使用 sql.js
 import initSqlJs from 'sql.js'
-// 导入 WASM 文件 URL（Vite 会正确处理）
-import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url'
 
 let db = null
 let SQL = null
@@ -14,9 +12,11 @@ export async function initDatabase() {
   if (db) return db
 
   try {
-    // 使用 Vite 导入的 WASM 文件 URL
+    // 动态加载 WASM 文件
+    const wasmUrl = await getWasmUrl()
+
     SQL = await initSqlJs({
-      locateFile: () => sqlWasmUrl
+      locateFile: () => wasmUrl
     })
   } catch (error) {
     console.error('Failed to load SQL.js:', error)
@@ -41,6 +41,26 @@ export async function initDatabase() {
   autoSave()
 
   return db
+}
+
+// 获取 WASM 文件 URL
+async function getWasmUrl() {
+  // 检测是否在 Electron 或 file: 协议环境
+  const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:'
+
+  if (isFileProtocol) {
+    // Electron 环境：使用 CDN 作为后备
+    return 'https://unpkg.com/sql.js@1.8.0/dist/sql-wasm.wasm'
+  }
+
+  // 浏览器环境：使用 Vite 的 ?url 导入
+  try {
+    const wasmModule = await import('sql.js/dist/sql-wasm.wasm?url')
+    return wasmModule.default
+  } catch {
+    // 后备方案：使用 CDN
+    return 'https://unpkg.com/sql.js@1.8.0/dist/sql-wasm.wasm'
+  }
 }
 
 // 创建数据表
@@ -217,8 +237,9 @@ export function exportDatabase() {
 
 // 导入数据库
 export async function importDatabase(data) {
+  const wasmUrl = await getWasmUrl()
   SQL = SQL || await initSqlJs({
-    locateFile: file => `https://sql.js.org/dist/${file}`
+    locateFile: () => wasmUrl
   })
   db = new SQL.Database(data)
   await saveToIndexedDB()
