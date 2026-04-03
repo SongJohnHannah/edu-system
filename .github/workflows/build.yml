@@ -12,6 +12,7 @@ permissions:
 jobs:
   build-mac:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -29,6 +30,7 @@ jobs:
         run: npm run electron:build:mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        timeout-minutes: 15
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -39,6 +41,7 @@ jobs:
 
   build-win:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -56,6 +59,7 @@ jobs:
         run: npm run electron:build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        timeout-minutes: 15
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -67,6 +71,7 @@ jobs:
   create-release:
     needs: [build-mac, build-win]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Download Mac artifacts
         uses: actions/download-artifact@v4
