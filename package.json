@@ -38,17 +38,11 @@
       "category": "public.app-category.education",
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "x64ArchFiles": "x64",
       "target": [
         {
           "target": "zip",
           "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "dmg",
-          "arch": [
+            "x64",
             "arm64"
           ]
         }
