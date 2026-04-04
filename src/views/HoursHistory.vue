@@ -105,7 +105,7 @@ onMounted(() => {
     return
   }
 
-  records.value = getHourRecordsByStudent(studentId).slice().reverse()
+  records.value = getHourRecordsByStudent(studentId)
 })
 
 const filteredRecords = computed(() => {

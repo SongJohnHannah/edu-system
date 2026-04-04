@@ -276,6 +276,39 @@ export function deleteAttendance(attendanceId) {
   return getAttendance()
 }
 
+export function removeStudentsFromRecord(attendanceId, studentIdsToRemove) {
+  checkInit()
+  const record = queryOne('SELECT * FROM attendance WHERE id = ?', [attendanceId])
+  if (!record) return getAttendance()
+
+  const currentStudentIds = JSON.parse(record.student_ids || '[]')
+  const removeSet = new Set(studentIdsToRemove)
+  const remainingIds = currentStudentIds.filter(id => !removeSet.has(id))
+
+  // 还原被删除学生的课时
+  studentIdsToRemove.forEach(studentId => {
+    query('UPDATE students SET used_hours = MAX(0, used_hours - ?), updated_at = ? WHERE id = ?', [record.hours_deducted, Date.now(), studentId])
+    addHourRecord({
+      studentId,
+      type: 'restore',
+      hours: record.hours_deducted,
+      remark: '删除点名记录还原',
+      relatedId: attendanceId,
+      operator: 'restore'
+    })
+  })
+
+  if (remainingIds.length === 0) {
+    // 所有学生都删除了，删除整条记录
+    query('DELETE FROM attendance WHERE id = ?', [attendanceId])
+  } else {
+    // 更新记录，只保留未删除的学生
+    query('UPDATE attendance SET student_ids = ? WHERE id = ?', [JSON.stringify(remainingIds), attendanceId])
+  }
+
+  return getAttendance()
+}
+
 // ========== 课时记录相关 ==========
 
 export function getHourRecords() {
@@ -294,7 +327,7 @@ export function saveHourRecords(records) {
   records.forEach(r => {
     query(`INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [r.id, r.studentId, r.type, r.hours, r.remark || '', r.relatedId, r.operator, r.createdAt]
+      [r.id, r.studentId, r.type, r.hours, r.remark || '', r.relatedId || null, r.operator || 'manual', r.createdAt || Date.now()]
     )
   })
 }
@@ -305,7 +338,7 @@ export function addHourRecord(record) {
   const now = Date.now()
   query(`INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, record.studentId, record.type, record.hours, record.remark || '', record.relatedId, record.operator || 'manual', now]
+    [id, record.studentId, record.type, record.hours, record.remark || '', record.relatedId || null, record.operator || 'manual', now]
   )
   return getHourRecords()
 }

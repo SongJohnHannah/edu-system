@@ -119,6 +119,18 @@
         </form>
       </div>
     </div>
+
+    <!-- 确认弹窗 -->
+    <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
+      <div class="modal modal-sm">
+        <h2 class="modal-title">删除课程</h2>
+        <p class="confirm-message">确定要删除课程"{{ deleteTargetName }}"吗？</p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
+          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteCourse">确认删除</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -133,6 +145,9 @@ const showModal = ref(false)
 const editingCourse = ref(null)
 const studentSearchText = ref('')
 const courseSearchText = ref('')
+const showConfirmModal = ref(false)
+const deleteTargetId = ref('')
+const deleteTargetName = ref('')
 
 const form = ref({
   name: '',
@@ -153,10 +168,10 @@ onMounted(() => {
 
 // 过滤学生列表
 const filteredStudents = computed(() => {
-  if (!studentSearchText.value) return students.value.filter(s => s.status !== 'deleted')
+  if (!studentSearchText.value) return students.value.filter(s => s.status === 'active')
   const search = studentSearchText.value.toLowerCase()
   return students.value.filter(s =>
-    s.name.toLowerCase().includes(search) && s.status !== 'deleted'
+    s.name.toLowerCase().includes(search) && s.status === 'active'
   )
 })
 
@@ -212,9 +227,16 @@ function saveCourse() {
 }
 
 function removeCourse(id) {
-  if (confirm('确定要删除这个课程吗？')) {
-    courses.value = deleteCourse(id)
-  }
+  const course = courses.value.find(c => c.id === id)
+  if (!course) return
+  deleteTargetId.value = id
+  deleteTargetName.value = course.name
+  showConfirmModal.value = true
+}
+
+function confirmDeleteCourse() {
+  courses.value = deleteCourse(deleteTargetId.value)
+  showConfirmModal.value = false
 }
 
 function closeModal() {
@@ -439,5 +461,16 @@ function closeModal() {
   gap: 12px;
   justify-content: flex-end;
   margin-top: 24px;
+}
+
+.modal-sm {
+  max-width: 400px;
+}
+
+.confirm-message {
+  font-size: 14px;
+  color: var(--color-text);
+  line-height: 1.6;
+  margin-bottom: 0;
 }
 </style>

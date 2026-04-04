@@ -79,16 +79,43 @@
         </div>
       </div>
 
+      <!-- 选择性删除弹窗 -->
+      <div class="modal-overlay" v-if="showDeleteModal" @click.self="showDeleteModal = false">
+        <div class="modal modal-sm">
+          <h2 class="modal-title">删除点名记录</h2>
+          <p class="delete-desc">选择要删除的学生，删除后将还原对应课时：</p>
+          <div class="delete-student-list">
+            <label class="delete-student-item" v-for="student in deleteTargetStudents" :key="student.id">
+              <input type="checkbox" :value="student.id" v-model="deleteCheckedStudents" />
+              <span class="delete-student-name">{{ student.name }}</span>
+            </label>
+          </div>
+          <div class="delete-select-actions">
+            <button type="button" class="btn btn-text" @click="deleteCheckedStudents = deleteTargetStudents.map(s => s.id)">全选</button>
+            <button type="button" class="btn btn-text" @click="deleteCheckedStudents = []">取消全选</button>
+          </div>
+          <div class="modal-actions">
+            <button class="btn btn-secondary" @click="showDeleteModal = false">取消</button>
+            <button class="btn btn-primary" style="background: var(--color-danger);" @click="confirmDeleteStudents" :disabled="deleteCheckedStudents.length === 0">
+              确认删除 ({{ deleteCheckedStudents.length }} 人)
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- 点名历史 -->
       <div class="history">
         <div class="history-header">
           <h3 class="history-title">点名记录</h3>
-          <select class="input filter-select" v-model="filterCourseId">
-            <option value="">全部课程</option>
-            <option v-for="course in courses" :key="course.id" :value="course.id">
-              {{ course.name }}
-            </option>
-          </select>
+          <div class="filter-group">
+            <select class="input filter-select" v-model="filterCourseId">
+              <option value="">全部课程</option>
+              <option v-for="course in courses" :key="course.id" :value="course.id">
+                {{ course.name }}
+              </option>
+            </select>
+            <input type="month" class="input filter-select" v-model="filterMonth" />
+          </div>
         </div>
         <div class="history-list" v-if="filteredRecords.length > 0">
           <div class="history-item" v-for="record in filteredRecords" :key="record.id">
@@ -96,13 +123,14 @@
               <div class="history-row">
                 <span class="history-date">{{ record.date }}</span>
                 <span class="history-course">{{ getCourseName(record.courseId) }}</span>
+                <span class="history-teacher">{{ getTeacherNameByCourse(record.courseId) }}</span>
               </div>
               <div class="history-row">
                 <span class="history-students">出勤: {{ getStudentNames(record.studentIds) }}</span>
                 <span class="history-hours">扣除 {{ record.hoursDeducted }} 课时/人</span>
               </div>
             </div>
-            <button class="btn btn-text delete-btn" @click="removeRecord(record.id)">删除</button>
+            <button class="btn btn-text delete-btn" @click="openDeleteModal(record)">删除</button>
           </div>
         </div>
         <div class="empty-history" v-else>
@@ -115,18 +143,26 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getCourses, getStudents, getTeachers, getAttendance, addAttendance, deductHours, deleteAttendance } from '../utils/storage'
+import { getCourses, getStudents, getTeachers, getAttendance, addAttendance, deductHours, removeStudentsFromRecord } from '../utils/storage'
+import { useToast } from '../composables/useToast'
 
+const toast = useToast()
 const courses = ref([])
 const students = ref([])
 const teachers = ref([])
 const attendanceRecords = ref([])
 const selectedCourseId = ref('')
 const filterCourseId = ref('')
+const filterMonth = ref(new Date().toISOString().slice(0, 7))
 const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
-const isDuplicateAttendance = ref(false)  // 是否重复点名
+const isDuplicateAttendance = ref(false)
+
+// 选择性删除相关
+const showDeleteModal = ref(false)
+const deleteTargetRecord = ref(null)
+const deleteCheckedStudents = ref([])
 
 // 检查今天是否已经点过名
 function hasTodayAttendance() {
@@ -157,8 +193,14 @@ const selectedCourse = computed(() => {
 })
 
 const filteredRecords = computed(() => {
-  if (!filterCourseId.value) return attendanceRecords.value
-  return attendanceRecords.value.filter(r => r.courseId === filterCourseId.value)
+  let result = attendanceRecords.value
+  if (filterCourseId.value) {
+    result = result.filter(r => r.courseId === filterCourseId.value)
+  }
+  if (filterMonth.value) {
+    result = result.filter(r => r.date && r.date.startsWith(filterMonth.value))
+  }
+  return result
 })
 
 const weekdayMap = { 1: '星期一', 2: '星期二', 3: '星期三', 4: '星期四', 5: '星期五', 6: '星期六', 7: '星期日' }
@@ -169,6 +211,13 @@ function getWeekdayText(weekday) {
 
 function getTeacherName(teacherId) {
   const teacher = teachers.value.find(t => t.id === teacherId)
+  return teacher ? teacher.name : ''
+}
+
+function getTeacherNameByCourse(courseId) {
+  const course = courses.value.find(c => c.id === courseId)
+  if (!course) return ''
+  const teacher = teachers.value.find(t => t.id === course.teacherId)
   return teacher ? teacher.name : ''
 }
 
@@ -192,7 +241,7 @@ function loadCourseStudents() {
   courseStudents.value = selectedCourse.value.studentIds
     .map(id => students.value.find(s => s.id === id))
     .filter(Boolean)
-    .filter(s => s.status !== 'deleted')
+    .filter(s => s.status === 'active')
   checkedStudents.value = [...courseStudents.value.map(s => s.id)]
 }
 
@@ -229,15 +278,39 @@ function submitAttendance() {
   // 重置
   showConfirmModal.value = false
   checkedStudents.value = []
-  alert('点名成功！已扣除对应课时。')
+  toast.success('点名成功！已扣除对应课时。')
   loadCourseStudents()
 }
 
-function removeRecord(id) {
-  if (confirm('确定要删除这条点名记录吗？删除后将还原对应学生的课时。')) {
-    attendanceRecords.value = deleteAttendance(id)
-    students.value = getStudents()
-    alert('已删除记录并还原课时。')
+// 选择性删除相关
+const deleteTargetStudents = computed(() => {
+  if (!deleteTargetRecord.value) return []
+  return (deleteTargetRecord.value.studentIds || [])
+    .map(id => students.value.find(s => s.id === id))
+    .filter(Boolean)
+})
+
+function openDeleteModal(record) {
+  deleteTargetRecord.value = record
+  deleteCheckedStudents.value = []
+  showDeleteModal.value = true
+}
+
+function confirmDeleteStudents() {
+  if (!deleteTargetRecord.value || deleteCheckedStudents.value.length === 0) return
+
+  const result = removeStudentsFromRecord(
+    deleteTargetRecord.value.id,
+    deleteCheckedStudents.value
+  )
+  attendanceRecords.value = result
+  students.value = getStudents()
+  showDeleteModal.value = false
+
+  if (deleteCheckedStudents.value.length === (deleteTargetRecord.value.studentIds || []).length) {
+    toast.success('已删除整条点名记录并还原所有学生课时。')
+  } else {
+    toast.success(`已删除 ${deleteCheckedStudents.value.length} 名学生并还原课时。`)
   }
 }
 </script>
@@ -425,6 +498,11 @@ function removeRecord(id) {
   color: var(--color-text);
 }
 
+.filter-group {
+  display: flex;
+  gap: 12px;
+}
+
 .filter-select {
   width: auto;
   min-width: 160px;
@@ -488,6 +566,47 @@ function removeRecord(id) {
 .delete-btn {
   color: var(--color-danger);
   padding: 4px 8px;
+}
+
+.delete-desc {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-bottom: 16px;
+}
+
+.delete-student-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.delete-student-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.delete-student-item input {
+  width: 18px;
+  height: 18px;
+}
+
+.delete-student-name {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.delete-select-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  margin-bottom: 16px;
 }
 
 .empty-history {

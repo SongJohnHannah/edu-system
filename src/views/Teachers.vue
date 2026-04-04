@@ -69,6 +69,18 @@
         </form>
       </div>
     </div>
+
+    <!-- 确认弹窗 -->
+    <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
+      <div class="modal modal-sm">
+        <h2 class="modal-title">删除教师</h2>
+        <p class="confirm-message">确定要删除教师"{{ deleteTargetName }}"吗？</p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
+          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteTeacher">确认删除</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -82,6 +94,9 @@ const courses = ref([])
 const searchText = ref('')
 const showModal = ref(false)
 const editingTeacher = ref(null)
+const showConfirmModal = ref(false)
+const deleteTargetId = ref('')
+const deleteTargetName = ref('')
 const form = ref({
   name: '',
   phone: '',
@@ -120,9 +135,16 @@ function saveTeacher() {
 }
 
 function removeTeacher(id) {
-  if (confirm('确定要删除这个教师吗？')) {
-    teachers.value = deleteTeacher(id)
-  }
+  const teacher = teachers.value.find(t => t.id === id)
+  if (!teacher) return
+  deleteTargetId.value = id
+  deleteTargetName.value = teacher.name
+  showConfirmModal.value = true
+}
+
+function confirmDeleteTeacher() {
+  teachers.value = deleteTeacher(deleteTargetId.value)
+  showConfirmModal.value = false
 }
 
 function closeModal() {
@@ -284,6 +306,16 @@ function closeModal() {
   gap: 12px;
   justify-content: flex-end;
   margin-top: 24px;
+}
+
+.modal-sm {
+  max-width: 400px;
+}
+
+.confirm-message {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
 }
 
 @media (max-width: 768px) {

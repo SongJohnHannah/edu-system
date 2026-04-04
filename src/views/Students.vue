@@ -33,13 +33,16 @@
             <th>联系电话</th>
             <th>总课时</th>
             <th>已用课时</th>
-            <th>剩余课时</th>
+            <th class="sortable" @click="toggleSort">
+              剩余课时
+              <span class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
+            </th>
             <th>状态</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="student in filteredStudents" :key="student.id" :class="{ 'row-deleted': student.status === 'deleted' }">
+          <tr v-for="student in filteredStudents" :key="student.id" :class="{ 'row-deleted': student.status === 'deleted' || student.status === 'quit' }">
             <td><strong>{{ student.name }}</strong></td>
             <td>{{ student.age || '-' }}</td>
             <td>{{ student.phone || '-' }}</td>
@@ -57,13 +60,15 @@
               </div>
             </td>
             <td>
-              <div class="action-buttons" v-if="student.status !== 'deleted'">
+              <div class="action-buttons" v-if="student.status === 'active'">
                 <button class="btn btn-text" @click="openAddHoursModal(student)" title="添加课时">加课</button>
                 <button class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</button>
                 <button class="btn btn-text" @click="editStudent(student)">编辑</button>
                 <button class="btn btn-text" style="color: var(--color-danger)" @click="removeStudent(student)">删除</button>
               </div>
-              <span v-else class="deleted-hint">已删除</span>
+              <div class="action-buttons" v-else>
+                <button class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</button>
+              </div>
             </td>
           </tr>
         </tbody>
@@ -205,6 +210,18 @@
         </div>
       </div>
     </div>
+
+    <!-- 确认弹窗 -->
+    <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
+      <div class="modal modal-sm">
+        <h2 class="modal-title">{{ confirmData.title }}</h2>
+        <p class="confirm-message" v-if="confirmData.message" v-html="confirmData.message"></p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
+          <button class="btn btn-primary" :style="confirmData.danger ? 'background: var(--color-danger)' : ''" @click="confirmData.onConfirm(); showConfirmModal = false">确认</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -212,8 +229,10 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getStudents, addStudent, updateStudent, deleteStudent, updateStudentStatus, addStudentsBatch, addHours, checkStudentNameExists } from '../utils/storage'
+import { useToast } from '../composables/useToast'
 
 const router = useRouter()
+const toast = useToast()
 const students = ref([])
 const searchText = ref('')
 const showModal = ref(false)
@@ -223,6 +242,11 @@ const showStatusModal = ref(false)
 const editingStudent = ref(null)
 const hoursStudent = ref(null)
 const statusStudent = ref(null)
+const sortOrder = ref('asc')
+
+// 确认弹窗
+const showConfirmModal = ref(false)
+const confirmData = ref({ title: '', message: '', onConfirm: () => {}, danger: false })
 
 const form = ref({
   name: '',
@@ -260,17 +284,22 @@ const filteredStudents = computed(() => {
     )
   }
 
-  // 按剩余课时排序（从小到大）
-  return result.slice().sort((a, b) => {
+  // 按剩余课时排序
+  const sorted = result.slice().sort((a, b) => {
     const remainingA = a.totalHours - (a.usedHours || 0)
     const remainingB = b.totalHours - (b.usedHours || 0)
-    return remainingA - remainingB
+    return sortOrder.value === 'asc' ? remainingA - remainingB : remainingB - remainingA
   })
+  return sorted
 })
 
 const hasValidBatchData = computed(() => {
   return batchRows.value.some(row => row.name && row.name.trim())
 })
+
+function toggleSort() {
+  sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+}
 
 // 学生状态（手动设置）
 function getStudentStatusClass(student) {
@@ -313,7 +342,7 @@ function editStudent(student) {
 function saveStudent() {
   // 检查重名
   if (checkStudentNameExists(form.value.name, editingStudent.value?.id)) {
-    alert(`学生"${form.value.name}"已存在，请使用其他姓名`)
+    toast.warning(`学生"${form.value.name}"已存在，请使用其他姓名`)
     return
   }
 
@@ -330,12 +359,16 @@ function removeStudent(student) {
 
   const remaining = student.totalHours - (student.usedHours || 0)
   const warning = remaining > 0
-    ? `该学生还有 ${remaining} 节剩余课时！`
+    ? `<br><span style="color: var(--color-warning)">该学生还有 ${remaining} 节剩余课时！</span>`
     : ''
 
-  if (confirm(`确定要删除学生"${student.name}"吗？\n\n${warning}\n删除后该学生的历史数据将保留，但无法进行任何操作。`)) {
-    students.value = updateStudentStatus(student.id, 'deleted')
+  confirmData.value = {
+    title: '删除学生',
+    message: `确定要删除学生"${student.name}"吗？${warning}<br><br><span style="font-size: 13px; color: var(--color-text-secondary)">删除后该学生的历史数据将保留，但无法进行任何操作。</span>`,
+    onConfirm: () => { students.value = updateStudentStatus(student.id, 'deleted') },
+    danger: true
   }
+  showConfirmModal.value = true
 }
 
 function closeModal() {
@@ -364,7 +397,7 @@ function closeBatchModal() {
 function saveBatchStudents() {
   const validRows = batchRows.value.filter(row => row.name && row.name.trim())
   if (validRows.length === 0) {
-    alert('请至少填写一个学生姓名')
+    toast.warning('请至少填写一个学生姓名')
     return
   }
 
@@ -389,19 +422,19 @@ function saveBatchStudents() {
   })
 
   if (existingNames.length > 0) {
-    alert(`以下学生姓名已存在：${existingNames.join('、')}\n请修改后重试`)
+    toast.warning(`以下学生姓名已存在：${existingNames.join('、')}`)
     return
   }
 
   if (duplicateInBatch.length > 0) {
-    alert(`批量输入中存在重复姓名：${duplicateInBatch.join('、')}\n请修改后重试`)
+    toast.warning(`批量输入中存在重复姓名：${duplicateInBatch.join('、')}`)
     return
   }
 
   const result = addStudentsBatch(validRows, batchDefaultHours.value)
   students.value = result.students
 
-  alert(`成功添加 ${result.addedCount} 名学生`)
+  toast.success(`成功添加 ${result.addedCount} 名学生`)
   closeBatchModal()
 }
 
@@ -421,7 +454,7 @@ function saveAddHours() {
   if (!hoursStudent.value || addHoursForm.value.hours <= 0) return
 
   students.value = addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
-  alert(`已为 ${hoursStudent.value.name} 添加 ${addHoursForm.value.hours} 课时`)
+  toast.success(`已为 ${hoursStudent.value.name} 添加 ${addHoursForm.value.hours} 课时`)
   closeHoursModal()
 }
 
@@ -505,6 +538,27 @@ function goToHistory(studentId) {
   display: flex;
   gap: 12px;
   justify-content: center;
+}
+
+.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable:hover {
+  color: var(--color-primary);
+}
+
+.sort-icon {
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.confirm-message {
+  font-size: 14px;
+  color: var(--color-text);
+  line-height: 1.6;
+  margin-bottom: 0;
 }
 
 .status-badges {

@@ -41,6 +41,7 @@
       </router-view>
     </main>
 
+    <Toast />
     <!-- 数据备份弹窗 -->
     <div class="modal-overlay" v-if="showBackupModal" @click.self="showBackupModal = false">
       <div class="modal">
@@ -93,6 +94,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import LockScreen from './components/LockScreen.vue'
+import Toast from './components/Toast.vue'
 import { downloadBackup, importData, getStorePath, checkIsElectron } from './utils/storage'
 
 const showBackupModal = ref(false)
