@@ -30,7 +30,7 @@
   },
   "build": {
     "appId": "com.edusystem.app",
-    "productName": "教务管理系统",
+    "productName": "EduSystem",
     "directories": {
       "output": "release"
     },
