@@ -10,7 +10,7 @@
             <rect width="100" height="100" rx="20" fill="#1d1d1f"/>
             <text x="50" y="65" font-size="50" text-anchor="middle" fill="white" font-family="Inter, sans-serif" font-weight="600">教</text>
           </svg>
-          <span class="logo-text">教务管理系统 <span class="version">v1.4.3</span></span>
+          <span class="logo-text">教务管理系统 <span class="version">v1.4.4</span></span>
         </div>
         <nav class="nav">
           <router-link to="/" class="nav-item" exact-active-class="active">首页</router-link>
