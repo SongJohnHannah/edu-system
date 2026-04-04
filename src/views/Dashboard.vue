@@ -7,19 +7,19 @@
       <h2 class="section-title">快速操作</h2>
       <div class="actions-grid">
         <router-link to="/attendance" class="action-card">
-          <span class="action-icon">✓</span>
+          <span class="action-icon">📋</span>
           <span>开始点名</span>
         </router-link>
         <router-link to="/students" class="action-card">
-          <span class="action-icon">+</span>
+          <span class="action-icon">👨‍🎓</span>
           <span>添加学生</span>
         </router-link>
         <router-link to="/teachers" class="action-card">
-          <span class="action-icon">+</span>
+          <span class="action-icon">👨‍🏫</span>
           <span>添加教师</span>
         </router-link>
         <router-link to="/courses" class="action-card">
-          <span class="action-icon">+</span>
+          <span class="action-icon">📚</span>
           <span>创建课程</span>
         </router-link>
       </div>
@@ -38,8 +38,8 @@
             </svg>
           </div>
           <div class="stat-info">
-            <span class="stat-value">{{ students.length }}</span>
-            <span class="stat-label">学生总数</span>
+            <span class="stat-value">{{ todayStudentCount }}</span>
+            <span class="stat-label">今日上课学生</span>
           </div>
         </router-link>
 
@@ -51,8 +51,8 @@
             </svg>
           </div>
           <div class="stat-info">
-            <span class="stat-value">{{ teachers.length }}</span>
-            <span class="stat-label">教师总数</span>
+            <span class="stat-value">{{ todayTeacherCount }}</span>
+            <span class="stat-label">今日上课教师</span>
           </div>
         </router-link>
 
@@ -66,8 +66,8 @@
             </svg>
           </div>
           <div class="stat-info">
-            <span class="stat-value">{{ courses.length }}</span>
-            <span class="stat-label">课程总数</span>
+            <span class="stat-value">{{ todayCourseCount }}</span>
+            <span class="stat-label">今日课程</span>
           </div>
         </router-link>
 
@@ -79,8 +79,8 @@
             </svg>
           </div>
           <div class="stat-info">
-            <span class="stat-value">{{ totalUsedHours }}</span>
-            <span class="stat-label">已消耗课时</span>
+            <span class="stat-value">{{ todayUsedHours }}</span>
+            <span class="stat-label">今日消耗课时</span>
           </div>
         </router-link>
 
@@ -92,8 +92,8 @@
             </svg>
           </div>
           <div class="stat-info">
-            <span class="stat-value">{{ totalAttendanceCount }}</span>
-            <span class="stat-label">点名总次数</span>
+            <span class="stat-value">{{ todayAttendanceCount }}</span>
+            <span class="stat-label">今日点名</span>
           </div>
         </router-link>
 
@@ -135,6 +135,11 @@ const teachers = ref([])
 const courses = ref([])
 const attendance = ref([])
 
+// 获取今日日期信息
+const today = new Date()
+const todayStr = today.toISOString().split('T')[0]
+const todayWeekday = today.getDay() || 7  // 0 转为 7（周日）
+
 onMounted(() => {
   students.value = getStudents()
   teachers.value = getTeachers()
@@ -142,20 +147,49 @@ onMounted(() => {
   attendance.value = getAttendance()
 })
 
-const totalUsedHours = computed(() => {
-  return students.value.reduce((sum, s) => sum + (s.usedHours || 0), 0)
+// 今日课程
+const todayCourses = computed(() => {
+  return courses.value.filter(c => c.weekday === todayWeekday)
 })
 
-const totalAttendanceCount = computed(() => {
-  return attendance.value.length
+// 今日上课教师数
+const todayTeacherCount = computed(() => {
+  const teacherIds = new Set(todayCourses.value.map(c => c.teacherId))
+  return teacherIds.size
 })
 
+// 今日上课学生数
+const todayStudentCount = computed(() => {
+  const studentIds = new Set()
+  todayCourses.value.forEach(c => {
+    (c.studentIds || []).forEach(id => studentIds.add(id))
+  })
+  return studentIds.size
+})
+
+// 今日课程数
+const todayCourseCount = computed(() => {
+  return todayCourses.value.length
+})
+
+// 今日已消耗课时
+const todayUsedHours = computed(() => {
+  const todayRecords = attendance.value.filter(r => r.date === todayStr)
+  return todayRecords.reduce((sum, r) => sum + (r.hoursDeducted || 1) * (r.studentIds?.length || 0), 0)
+})
+
+// 今日点名次数
+const todayAttendanceCount = computed(() => {
+  return attendance.value.filter(r => r.date === todayStr).length
+})
+
+// 本月点名次数
 const thisMonthAttendanceCount = computed(() => {
-  const now = new Date()
-  const thisMonth = now.toISOString().slice(0, 7)
+  const thisMonth = today.toISOString().slice(0, 7)
   return attendance.value.filter(r => r.date.startsWith(thisMonth)).length
 })
 
+// 课时预警学生
 const lowHoursStudents = computed(() => {
   return students.value.filter(s => (s.totalHours - s.usedHours) < 3 && (s.totalHours - s.usedHours) > 0)
 })
