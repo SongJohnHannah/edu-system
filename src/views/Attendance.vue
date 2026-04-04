@@ -54,7 +54,7 @@
           <span>共 <strong>{{ checkedStudents.length * (selectedCourse.hoursPerClass || 1) }}</strong> 课时</span>
         </div>
 
-        <button class="btn btn-primary btn-lg" @click="showConfirmModal = true" :disabled="checkedStudents.length === 0">
+        <button class="btn btn-primary btn-lg" @click="handleConfirmClick" :disabled="checkedStudents.length === 0">
           确认点名 ({{ checkedStudents.length }} 人)
         </button>
       </div>
@@ -63,6 +63,9 @@
       <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
         <div class="modal modal-sm">
           <h2 class="modal-title">确认点名</h2>
+          <div class="confirm-warning" v-if="isDuplicateAttendance">
+            <p>⚠️ 该课程今天已经点过名了，是否继续点名？</p>
+          </div>
           <div class="confirm-info">
             <p>课程：<strong>{{ selectedCourse?.name }}</strong></p>
             <p>出勤学生：<strong>{{ checkedStudents.length }}</strong> 人</p>
@@ -123,6 +126,22 @@ const filterCourseId = ref('')
 const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
+const isDuplicateAttendance = ref(false)  // 是否重复点名
+
+// 检查今天是否已经点过名
+function hasTodayAttendance() {
+  if (!selectedCourse.value) return false
+  const today = new Date().toISOString().split('T')[0]
+  return attendanceRecords.value.some(r =>
+    r.courseId === selectedCourse.value.id && r.date === today
+  )
+}
+
+// 点击确认点名按钮
+function handleConfirmClick() {
+  isDuplicateAttendance.value = hasTodayAttendance()
+  showConfirmModal.value = true
+}
 
 const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
 
@@ -509,6 +528,36 @@ function removeRecord(id) {
   margin-bottom: 24px;
 }
 
+.confirm-warning {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.confirm-warning p {
+  margin: 0;
+  color: #856404;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.confirm-warning {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.confirm-warning p {
+  margin: 0;
+  font-size: 14px;
+  color: #856404;
+}
+
 .confirm-info p {
   margin-bottom: 12px;
   color: var(--color-text-secondary);
@@ -522,5 +571,19 @@ function removeRecord(id) {
   display: flex;
   gap: 12px;
   justify-content: flex-end;
+}
+
+.confirm-warning {
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  color: #856404;
+}
+
+.confirm-warning p {
+  margin: 0;
+  font-size: 14px;
 }
 </style>
