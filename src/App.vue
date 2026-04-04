@@ -27,7 +27,7 @@
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            数据备份
+            <span>数据备份</span>
           </button>
         </div>
       </div>
@@ -156,6 +156,7 @@ function handleImport(event) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
 }
 
 .logo {
@@ -317,5 +318,89 @@ function handleImport(event) {
   gap: 12px;
   justify-content: flex-end;
   margin-top: 24px;
+}
+
+/* 响应式布局 */
+@media (max-width: 900px) {
+  .header-content {
+    padding: 0 16px;
+  }
+
+  .nav-item {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .logo-text {
+    font-size: 16px;
+  }
+
+  .header-actions .btn-sm span {
+    display: none;
+  }
+
+  .header-actions .btn-sm {
+    padding: 8px;
+  }
+}
+
+@media (max-width: 768px) {
+  .header-content {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+
+  .logo {
+    flex-shrink: 0;
+  }
+
+  .nav {
+    width: 100%;
+    order: 3;
+    margin-top: 12px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-item {
+    padding: 6px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .header-actions {
+    margin-left: auto;
+  }
+
+  .btn-sm {
+    padding: 6px 10px;
+  }
+
+  .btn-sm svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .main {
+    padding: 24px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .logo-text {
+    font-size: 15px;
+  }
+
+  .logo svg {
+    width: 28px;
+    height: 28px;
+  }
 }
 </style>
