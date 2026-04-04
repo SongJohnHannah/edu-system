@@ -52,28 +52,35 @@ export async function initDatabase() {
 async function getWasmUrl() {
   if (isElectron()) {
     // Electron 环境：使用本地打包的 WASM 文件
+    // 获取当前页面的基础路径
+    const baseUrl = window.location.href.replace(/index\.html.*$/, '')
+    console.log('Base URL:', baseUrl)
+
     // 尝试多个可能的路径
     const possiblePaths = [
-      // 打包后的路径
+      // 固定名称的 WASM 文件
+      baseUrl + 'assets/sql-wasm.wasm',
+      // 相对路径
       './assets/sql-wasm.wasm',
-      // 开发环境路径
-      '../node_modules/sql.js/dist/sql-wasm.wasm'
+      // 绝对路径
+      '/assets/sql-wasm.wasm'
     ]
 
     for (const path of possiblePaths) {
       try {
+        console.log('Trying WASM path:', path)
         const response = await fetch(path)
         if (response.ok) {
           console.log('Using WASM from:', path)
           return path
         }
       } catch (e) {
-        // 继续尝试下一个路径
+        console.log('Failed to load WASM from:', path, e.message)
       }
     }
 
     // 如果本地都找不到，使用 CDN 作为后备
-    console.log('Using WASM from CDN')
+    console.log('Using WASM from CDN as fallback')
     return 'https://unpkg.com/sql.js@1.8.0/dist/sql-wasm.wasm'
   }
 
