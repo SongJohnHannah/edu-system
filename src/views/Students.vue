@@ -39,7 +39,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr v-for="student in filteredStudents" :key="student.id">
+          <tr v-for="student in filteredStudents" :key="student.id" :class="{ 'row-deleted': student.status === 'deleted' }">
             <td><strong>{{ student.name }}</strong></td>
             <td>{{ student.age || '-' }}</td>
             <td>{{ student.phone || '-' }}</td>
@@ -57,12 +57,13 @@
               </div>
             </td>
             <td>
-              <div class="action-buttons">
+              <div class="action-buttons" v-if="student.status !== 'deleted'">
                 <button class="btn btn-text" @click="openAddHoursModal(student)" title="添加课时">加课</button>
                 <button class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</button>
                 <button class="btn btn-text" @click="editStudent(student)">编辑</button>
-                <button class="btn btn-text" style="color: var(--color-danger)" @click="removeStudent(student.id)">删除</button>
+                <button class="btn btn-text" style="color: var(--color-danger)" @click="removeStudent(student)">删除</button>
               </div>
+              <span v-else class="deleted-hint">已删除</span>
             </td>
           </tr>
         </tbody>
@@ -273,10 +274,12 @@ const hasValidBatchData = computed(() => {
 
 // 学生状态（手动设置）
 function getStudentStatusClass(student) {
+  if (student.status === 'deleted') return 'badge-danger'
   return student.status === 'quit' ? 'badge-secondary' : 'badge-info'
 }
 
 function getStudentStatusText(student) {
+  if (student.status === 'deleted') return '已删除'
   return student.status === 'quit' ? '退学' : '正常'
 }
 
@@ -322,9 +325,16 @@ function saveStudent() {
   closeModal()
 }
 
-function removeStudent(id) {
-  if (confirm('确定要删除这个学生吗？')) {
-    students.value = deleteStudent(id)
+function removeStudent(student) {
+  if (student.status === 'deleted') return
+
+  const remaining = student.totalHours - (student.usedHours || 0)
+  const warning = remaining > 0
+    ? `该学生还有 ${remaining} 节剩余课时！`
+    : ''
+
+  if (confirm(`确定要删除学生"${student.name}"吗？\n\n${warning}\n删除后该学生的历史数据将保留，但无法进行任何操作。`)) {
+    students.value = updateStudentStatus(student.id, 'deleted')
   }
 }
 
@@ -731,6 +741,30 @@ function goToHistory(studentId) {
   font-size: 12px;
   color: var(--color-text-secondary);
   margin-left: auto;
+}
+
+/* 已删除学生样式 */
+.row-deleted {
+  opacity: 0.5;
+}
+
+.row-deleted td {
+  color: var(--color-text-secondary);
+}
+
+.row-deleted td strong {
+  text-decoration: line-through;
+  color: #8e8e93;
+}
+
+.deleted-hint {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(255, 59, 48, 0.1);
+  color: var(--color-danger);
 }
 
 @media (max-width: 768px) {

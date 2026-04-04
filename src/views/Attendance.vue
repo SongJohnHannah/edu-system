@@ -189,7 +189,10 @@ function loadCourseStudents() {
     courseStudents.value = []
     return
   }
-  courseStudents.value = selectedCourse.value.studentIds.map(id => students.value.find(s => s.id === id)).filter(Boolean)
+  courseStudents.value = selectedCourse.value.studentIds
+    .map(id => students.value.find(s => s.id === id))
+    .filter(Boolean)
+    .filter(s => s.status !== 'deleted')
   checkedStudents.value = [...courseStudents.value.map(s => s.id)]
 }
 

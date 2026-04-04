@@ -153,10 +153,10 @@ onMounted(() => {
 
 // 过滤学生列表
 const filteredStudents = computed(() => {
-  if (!studentSearchText.value) return students.value
+  if (!studentSearchText.value) return students.value.filter(s => s.status !== 'deleted')
   const search = studentSearchText.value.toLowerCase()
   return students.value.filter(s =>
-    s.name.toLowerCase().includes(search)
+    s.name.toLowerCase().includes(search) && s.status !== 'deleted'
   )
 })
 
