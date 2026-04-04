@@ -811,16 +811,6 @@ function goToHistory(studentId) {
   color: #8e8e93;
 }
 
-.deleted-hint {
-  display: inline-block;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 500;
-  background: rgba(255, 59, 48, 0.1);
-  color: var(--color-danger);
-}
-
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
