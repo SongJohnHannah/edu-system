@@ -51,7 +51,29 @@ export async function initDatabase() {
 // 获取 WASM 文件 URL
 async function getWasmUrl() {
   if (isElectron()) {
-    // Electron 环境：使用 CDN
+    // Electron 环境：使用本地打包的 WASM 文件
+    // 尝试多个可能的路径
+    const possiblePaths = [
+      // 打包后的路径
+      './assets/sql-wasm.wasm',
+      // 开发环境路径
+      '../node_modules/sql.js/dist/sql-wasm.wasm'
+    ]
+
+    for (const path of possiblePaths) {
+      try {
+        const response = await fetch(path)
+        if (response.ok) {
+          console.log('Using WASM from:', path)
+          return path
+        }
+      } catch (e) {
+        // 继续尝试下一个路径
+      }
+    }
+
+    // 如果本地都找不到，使用 CDN 作为后备
+    console.log('Using WASM from CDN')
     return 'https://unpkg.com/sql.js@1.8.0/dist/sql-wasm.wasm'
   }
 
