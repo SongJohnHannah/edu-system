@@ -1,7 +1,7 @@
 {
   "name": "edu-system",
   "private": true,
-  "version": "1.4.5",
+  "version": "1.5.0",
   "description": "教务管理系统 - 小型培训机构教务管理工具",
   "author": "EduSystem",
   "type": "module",
