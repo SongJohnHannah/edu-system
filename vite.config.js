@@ -4,6 +4,7 @@ import { copyFileSync, mkdirSync, existsSync, readdirSync } from 'fs'
 import { join } from 'path'
 
 export default defineConfig({
+  base: './',
   plugins: [
     vue(),
     {
