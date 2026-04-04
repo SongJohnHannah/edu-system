@@ -7,6 +7,11 @@ let SQL = null
 // 数据库版本，用于迁移
 const DB_VERSION = 1
 
+// 检测运行环境
+function isElectron() {
+  return typeof window !== 'undefined' && window.location.protocol === 'file:'
+}
+
 // 初始化数据库
 export async function initDatabase() {
   if (db) return db
@@ -24,8 +29,8 @@ export async function initDatabase() {
     throw new Error(`数据库加载失败: ${error.message}`)
   }
 
-  // 尝试从 IndexedDB 加载现有数据库
-  const savedData = await loadFromIndexedDB()
+  // 尝试从存储加载现有数据库
+  const savedData = await loadFromStorage()
   if (savedData) {
     db = new SQL.Database(savedData)
   } else {
@@ -37,7 +42,7 @@ export async function initDatabase() {
   // 运行迁移
   runMigrations()
 
-  // 自动保存到 IndexedDB
+  // 自动保存
   autoSave()
 
   return db
@@ -45,11 +50,8 @@ export async function initDatabase() {
 
 // 获取 WASM 文件 URL
 async function getWasmUrl() {
-  // 检测是否在 Electron 或 file: 协议环境
-  const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:'
-
-  if (isFileProtocol) {
-    // Electron 环境：使用 CDN 作为后备
+  if (isElectron()) {
+    // Electron 环境：使用 CDN
     return 'https://unpkg.com/sql.js@1.8.0/dist/sql-wasm.wasm'
   }
 
@@ -58,9 +60,109 @@ async function getWasmUrl() {
     const wasmModule = await import('sql.js/dist/sql-wasm.wasm?url')
     return wasmModule.default
   } catch {
-    // 后备方案：使用 CDN
     return 'https://unpkg.com/sql.js@1.8.0/dist/sql-wasm.wasm'
   }
+}
+
+// 从存储加载数据（IndexedDB 或 localStorage）
+async function loadFromStorage() {
+  if (isElectron()) {
+    // Electron 环境使用 localStorage
+    try {
+      const data = localStorage.getItem('edu-system-db')
+      if (data) {
+        const uint8Array = new Uint8Array(JSON.parse(data))
+        return uint8Array
+      }
+    } catch (error) {
+      console.error('Failed to load from localStorage:', error)
+    }
+    return null
+  }
+
+  // 浏览器环境使用 IndexedDB
+  return loadFromIndexedDB()
+}
+
+// 保存数据到存储
+async function saveToStorage() {
+  if (!db) return
+
+  if (isElectron()) {
+    // Electron 环境使用 localStorage
+    try {
+      const data = db.export()
+      const array = Array.from(data)
+      localStorage.setItem('edu-system-db', JSON.stringify(array))
+    } catch (error) {
+      console.error('Failed to save to localStorage:', error)
+    }
+    return
+  }
+
+  // 浏览器环境使用 IndexedDB
+  return saveToIndexedDB()
+}
+
+// IndexedDB 操作（浏览器环境）
+const DB_NAME = 'edu-system-db'
+const STORE_NAME = 'database'
+
+function openIndexedDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1)
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => resolve(request.result)
+    request.onupgradeneeded = (event) => {
+      const idb = event.target.result
+      if (!idb.objectStoreNames.contains(STORE_NAME)) {
+        idb.createObjectStore(STORE_NAME)
+      }
+    }
+  })
+}
+
+async function loadFromIndexedDB() {
+  try {
+    const idb = await openIndexedDB()
+    return new Promise((resolve, reject) => {
+      const transaction = idb.transaction(STORE_NAME, 'readonly')
+      const store = transaction.objectStore(STORE_NAME)
+      const request = store.get('data')
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => resolve(request.result)
+    })
+  } catch (error) {
+    console.error('Failed to load from IndexedDB:', error)
+    return null
+  }
+}
+
+async function saveToIndexedDB() {
+  if (!db) return
+
+  try {
+    const data = db.export()
+    const idb = await openIndexedDB()
+    return new Promise((resolve, reject) => {
+      const transaction = idb.transaction(STORE_NAME, 'readwrite')
+      const store = transaction.objectStore(STORE_NAME)
+      const request = store.put(data, 'data')
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => resolve()
+    })
+  } catch (error) {
+    console.error('Failed to save to IndexedDB:', error)
+  }
+}
+
+// 自动保存
+let saveTimeout = null
+function autoSave() {
+  if (saveTimeout) clearTimeout(saveTimeout)
+  saveTimeout = setTimeout(() => {
+    saveToStorage()
+  }, 1000)
 }
 
 // 创建数据表
@@ -162,71 +264,9 @@ function runMigrations() {
   const currentVersion = result.length > 0 ? parseInt(result[0].values[0][0]) : 0
 
   if (currentVersion < DB_VERSION) {
-    // 未来版本迁移逻辑放这里
     db.run('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', ['db_version', DB_VERSION])
-    saveToIndexedDB()
+    saveToStorage()
   }
-}
-
-// IndexedDB 操作
-const DB_NAME = 'edu-system-db'
-const STORE_NAME = 'database'
-
-function openIndexedDB() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1)
-    request.onerror = () => reject(request.error)
-    request.onsuccess = () => resolve(request.result)
-    request.onupgradeneeded = (event) => {
-      const idb = event.target.result
-      if (!idb.objectStoreNames.contains(STORE_NAME)) {
-        idb.createObjectStore(STORE_NAME)
-      }
-    }
-  })
-}
-
-async function loadFromIndexedDB() {
-  try {
-    const idb = await openIndexedDB()
-    return new Promise((resolve, reject) => {
-      const transaction = idb.transaction(STORE_NAME, 'readonly')
-      const store = transaction.objectStore(STORE_NAME)
-      const request = store.get('data')
-      request.onerror = () => reject(request.error)
-      request.onsuccess = () => resolve(request.result)
-    })
-  } catch (error) {
-    console.error('Failed to load from IndexedDB:', error)
-    return null
-  }
-}
-
-async function saveToIndexedDB() {
-  if (!db) return
-
-  try {
-    const data = db.export()
-    const idb = await openIndexedDB()
-    return new Promise((resolve, reject) => {
-      const transaction = idb.transaction(STORE_NAME, 'readwrite')
-      const store = transaction.objectStore(STORE_NAME)
-      const request = store.put(data, 'data')
-      request.onerror = () => reject(request.error)
-      request.onsuccess = () => resolve()
-    })
-  } catch (error) {
-    console.error('Failed to save to IndexedDB:', error)
-  }
-}
-
-// 自动保存
-let saveTimeout = null
-function autoSave() {
-  if (saveTimeout) clearTimeout(saveTimeout)
-  saveTimeout = setTimeout(() => {
-    saveToIndexedDB()
-  }, 1000)
 }
 
 // 导出数据库
@@ -242,7 +282,7 @@ export async function importDatabase(data) {
     locateFile: () => wasmUrl
   })
   db = new SQL.Database(data)
-  await saveToIndexedDB()
+  await saveToStorage()
 }
 
 // 获取数据库实例
@@ -285,5 +325,5 @@ export function generateId() {
 
 // 保存数据库
 export function saveDatabase() {
-  return saveToIndexedDB()
+  return saveToStorage()
 }
