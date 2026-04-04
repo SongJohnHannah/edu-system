@@ -19,6 +19,7 @@
           <router-link to="/courses" class="nav-item" active-class="active">课程安排</router-link>
           <router-link to="/attendance" class="nav-item" active-class="active">点名</router-link>
           <router-link to="/calendar" class="nav-item" active-class="active">日历</router-link>
+          <router-link to="/teacher-stats" class="nav-item" active-class="active">教师统计</router-link>
         </nav>
         <div class="header-actions">
           <button class="btn btn-secondary btn-sm" @click="showBackupModal = true">

@@ -537,3 +537,148 @@ export async function getStorePath() {
 export function checkIsElectron() {
   return false
 }
+
+// ========== 教师统计相关 ==========
+
+/**
+ * 获取教师工作量统计（支持时间范围筛选）
+ */
+export function getTeacherStats(startDate, endDate) {
+  checkInit()
+
+  const teachers = getTeachers()
+  const courses = getCourses()
+  const attendance = getAttendance()
+
+  // 格式化日期范围为字符串
+  const startStr = startDate.toISOString().split('T')[0]
+  const endStr = endDate.toISOString().split('T')[0]
+
+  // 筛选时间范围内的点名记录
+  const filteredAttendance = attendance.filter(r =>
+    r.date >= startStr && r.date <= endStr
+  )
+
+  return teachers.map(teacher => {
+    // 该教师的课程
+    const teacherCourses = courses.filter(c => c.teacherId === teacher.id)
+    const courseIds = teacherCourses.map(c => c.id)
+
+    // 授课学生数（去重）
+    const studentSet = new Set()
+    teacherCourses.forEach(c => {
+      (c.studentIds || []).forEach(id => studentSet.add(id))
+    })
+
+    // 该教师在时间范围内的点名记录
+    const teacherAttendance = filteredAttendance.filter(r =>
+      courseIds.includes(r.courseId)
+    )
+
+    // 点名次数
+    const attendanceCount = teacherAttendance.length
+
+    // 消耗课时（每条点名记录的 hoursDeducted * 出勤学生数）
+    const consumedHours = teacherAttendance.reduce((sum, r) =>
+      sum + (r.hoursDeducted || 1) * (r.studentIds?.length || 0), 0
+    )
+
+    return {
+      ...teacher,
+      courseCount: teacherCourses.length,
+      studentCount: studentSet.size,
+      attendanceCount,
+      consumedHours
+    }
+  })
+}
+
+/**
+ * 获取上课日分布统计（周一至周日）
+ */
+export function getWeekdayDistribution() {
+  checkInit()
+
+  const courses = getCourses()
+  const distribution = [0, 0, 0, 0, 0, 0, 0] // 索引 0=周一, 6=周日
+
+  courses.forEach(c => {
+    const weekday = c.weekday
+    if (weekday >= 1 && weekday <= 7) {
+      distribution[weekday - 1]++
+    }
+  })
+
+  return distribution
+}
+
+/**
+ * 获取总体统计数据
+ */
+export function getOverallStats(startDate, endDate) {
+  checkInit()
+
+  const startStr = startDate.toISOString().split('T')[0]
+  const endStr = endDate.toISOString().split('T')[0]
+
+  const teachers = getTeachers()
+  const courses = getCourses()
+  const attendance = getAttendance()
+
+  // 筛选时间范围内的点名记录
+  const filteredAttendance = attendance.filter(r =>
+    r.date >= startStr && r.date <= endStr
+  )
+
+  // 总消耗课时
+  const totalConsumedHours = filteredAttendance.reduce((sum, r) =>
+    sum + (r.hoursDeducted || 1) * (r.studentIds?.length || 0), 0
+  )
+
+  // 涉及的教师数（有点名记录的课程对应的教师）
+  const activeCourseIds = new Set(filteredAttendance.map(r => r.courseId))
+  const activeTeacherIds = new Set()
+  courses.forEach(c => {
+    if (activeCourseIds.has(c.id)) {
+      activeTeacherIds.add(c.teacherId)
+    }
+  })
+
+  return {
+    totalTeachers: teachers.length,
+    activeTeachers: activeTeacherIds.size,
+    totalCourses: courses.length,
+    totalAttendance: filteredAttendance.length,
+    totalConsumedHours
+  }
+}
+
+/**
+ * 获取时间范围快捷选项的日期
+ */
+export function getDateRange(preset) {
+  const today = new Date()
+  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+
+  switch (preset) {
+    case 'today': {
+      return { start: startOfDay, end: startOfDay }
+    }
+    case 'week': {
+      const dayOfWeek = today.getDay() || 7
+      const start = new Date(startOfDay)
+      start.setDate(start.getDate() - dayOfWeek + 1)
+      return { start, end: startOfDay }
+    }
+    case 'month': {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1)
+      return { start, end: startOfDay }
+    }
+    case 'year': {
+      const start = new Date(today.getFullYear(), 0, 1)
+      return { start, end: startOfDay }
+    }
+    default:
+      return { start: startOfDay, end: startOfDay }
+  }
+}
