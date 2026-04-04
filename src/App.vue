@@ -3,7 +3,7 @@
     <!-- 锁屏 -->
     <LockScreen />
 
-    <header class="header">
+    <header class="header" :class="{ 'header-electron': isElectronEnv }">
       <div class="header-content">
         <div class="logo">
           <svg width="32" height="32" viewBox="0 0 100 100">
@@ -319,6 +319,11 @@ function handleImport(event) {
   gap: 12px;
   justify-content: flex-end;
   margin-top: 24px;
+}
+
+/* Electron 环境：为红绿灯按钮留出空间 */
+.header-electron .header-content {
+  padding-left: 78px;
 }
 
 /* 响应式布局 */
