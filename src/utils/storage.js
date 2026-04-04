@@ -535,7 +535,7 @@ export async function getStorePath() {
 }
 
 export function checkIsElectron() {
-  return false
+  return typeof window !== 'undefined' && window.location.protocol === 'file:'
 }
 
 // ========== 教师统计相关 ==========

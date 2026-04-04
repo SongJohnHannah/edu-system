@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
 
 const routes = [
   {
@@ -43,8 +43,11 @@ const routes = [
   }
 ]
 
+// Electron 环境使用 Hash 模式，浏览器使用 History 模式
+const isElectron = typeof window !== 'undefined' && window.location.protocol === 'file:'
+
 const router = createRouter({
-  history: createWebHistory(),
+  history: isElectron ? createWebHashHistory() : createWebHistory(),
   routes
 })
 
