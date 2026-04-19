@@ -2,6 +2,12 @@ import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router
 
 const routes = [
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('../views/Login.vue'),
+    meta: { public: true }
+  },
+  {
     path: '/',
     name: 'Dashboard',
     component: () => import('../views/Dashboard.vue')
@@ -19,7 +25,8 @@ const routes = [
   {
     path: '/teachers',
     name: 'Teachers',
-    component: () => import('../views/Teachers.vue')
+    component: () => import('../views/Teachers.vue'),
+    meta: { adminOnly: true }
   },
   {
     path: '/courses',
@@ -40,15 +47,51 @@ const routes = [
     path: '/teacher-stats',
     name: 'TeacherStats',
     component: () => import('../views/TeacherStats.vue')
+  },
+  {
+    path: '/profile',
+    name: 'Profile',
+    component: () => import('../views/Profile.vue')
   }
 ]
 
-// Electron 环境使用 Hash 模式，浏览器使用 History 模式
 const isElectron = typeof window !== 'undefined' && window.location.protocol === 'file:'
 
 const router = createRouter({
   history: isElectron ? createWebHashHistory() : createWebHistory(),
   routes
+})
+
+router.beforeEach((to, from, next) => {
+  const useApi = import.meta.env.VITE_USE_API === 'true'
+  if (!useApi) {
+    return next()
+  }
+
+  const userStr = localStorage.getItem('user')
+  const isAuthenticated = !!userStr
+
+  if (to.path === '/login') {
+    if (isAuthenticated) return next('/')
+    return next()
+  }
+
+  if (!isAuthenticated) {
+    return next('/login')
+  }
+
+  if (to.meta.adminOnly) {
+    try {
+      const user = JSON.parse(userStr)
+      if (user.role !== 'admin') {
+        return next('/')
+      }
+    } catch {
+      return next('/login')
+    }
+  }
+
+  next()
 })
 
 export default router

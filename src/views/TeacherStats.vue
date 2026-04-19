@@ -170,17 +170,17 @@ const weekdayDistribution = ref([0, 0, 0, 0, 0, 0, 0])
 const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 // 加载数据
-function loadData() {
-  teacherStats.value = getTeacherStats(startDate.value, endDate.value)
-  overallStats.value = getOverallStats(startDate.value, endDate.value)
-  weekdayDistribution.value = getWeekdayDistribution()
+async function loadData() {
+  teacherStats.value = await getTeacherStats(startDate.value, endDate.value) || []
+  overallStats.value = await getOverallStats(startDate.value, endDate.value) || {}
+  weekdayDistribution.value = await getWeekdayDistribution() || []
 }
 
 // 设置预设时间范围
-function setPreset(preset) {
+async function setPreset(preset) {
   activePreset.value = preset
   if (preset !== 'custom') {
-    const range = getDateRange(preset)
+    const range = await getDateRange(preset)
     startDate.value = range.start
     endDate.value = range.end
     loadData()
@@ -213,9 +213,9 @@ function getBarWidth(count) {
   return (count / max) * 100
 }
 
-onMounted(() => {
+onMounted(async () => {
   // 初始化为本月
-  const range = getDateRange('month')
+  const range = await getDateRange('month')
   startDate.value = range.start
   endDate.value = range.end
   loadData()

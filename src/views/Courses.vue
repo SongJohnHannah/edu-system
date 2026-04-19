@@ -160,10 +160,13 @@ const form = ref({
   studentIds: []
 })
 
-onMounted(() => {
-  courses.value = getCourses()
-  teachers.value = getTeachers()
-  students.value = getStudents()
+onMounted(async () => {
+  const [c, t, s] = await Promise.all([
+    getCourses(), getTeachers(), getStudents()
+  ])
+  courses.value = c || []
+  teachers.value = t || []
+  students.value = s || []
 })
 
 // 过滤学生列表
@@ -217,11 +220,11 @@ function editCourse(course) {
   showModal.value = true
 }
 
-function saveCourse() {
+async function saveCourse() {
   if (editingCourse.value) {
-    courses.value = updateCourse(editingCourse.value.id, form.value)
+    courses.value = await updateCourse(editingCourse.value.id, form.value)
   } else {
-    courses.value = addCourse(form.value)
+    courses.value = await addCourse(form.value)
   }
   closeModal()
 }
@@ -234,8 +237,8 @@ function removeCourse(id) {
   showConfirmModal.value = true
 }
 
-function confirmDeleteCourse() {
-  courses.value = deleteCourse(deleteTargetId.value)
+async function confirmDeleteCourse() {
+  courses.value = await deleteCourse(deleteTargetId.value)
   showConfirmModal.value = false
 }
 

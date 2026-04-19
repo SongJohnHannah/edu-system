@@ -268,8 +268,8 @@ const statusForm = ref({
   status: 'active'
 })
 
-onMounted(() => {
-  students.value = getStudents()
+onMounted(async () => {
+  students.value = await getStudents() || []
 })
 
 const filteredStudents = computed(() => {
@@ -339,17 +339,18 @@ function editStudent(student) {
   showModal.value = true
 }
 
-function saveStudent() {
+async function saveStudent() {
   // 检查重名
-  if (checkStudentNameExists(form.value.name, editingStudent.value?.id)) {
+  const exists = await checkStudentNameExists(form.value.name, editingStudent.value?.id)
+  if (exists) {
     toast.warning(`学生"${form.value.name}"已存在，请使用其他姓名`)
     return
   }
 
   if (editingStudent.value) {
-    students.value = updateStudent(editingStudent.value.id, form.value)
+    students.value = await updateStudent(editingStudent.value.id, form.value)
   } else {
-    students.value = addStudent(form.value)
+    students.value = await addStudent(form.value)
   }
   closeModal()
 }
@@ -365,7 +366,7 @@ function removeStudent(student) {
   confirmData.value = {
     title: '删除学生',
     message: `确定要删除学生"${student.name}"吗？${warning}<br><br><span style="font-size: 13px; color: var(--color-text-secondary)">删除后该学生的历史数据将保留，但无法进行任何操作。</span>`,
-    onConfirm: () => { students.value = updateStudentStatus(student.id, 'deleted') },
+    onConfirm: async () => { students.value = await updateStudentStatus(student.id, 'deleted') },
     danger: true
   }
   showConfirmModal.value = true
@@ -394,7 +395,7 @@ function closeBatchModal() {
   batchDefaultHours.value = 0
 }
 
-function saveBatchStudents() {
+async function saveBatchStudents() {
   const validRows = batchRows.value.filter(row => row.name && row.name.trim())
   if (validRows.length === 0) {
     toast.warning('请至少填写一个学生姓名')
@@ -405,11 +406,12 @@ function saveBatchStudents() {
   const existingNames = []
   const duplicateInBatch = []
 
-  validRows.forEach(row => {
-    if (checkStudentNameExists(row.name.trim())) {
+  for (const row of validRows) {
+    const exists = await checkStudentNameExists(row.name.trim())
+    if (exists) {
       existingNames.push(row.name.trim())
     }
-  })
+  }
 
   // 检查批量输入内部是否有重复
   const nameSet = new Set()
@@ -431,7 +433,7 @@ function saveBatchStudents() {
     return
   }
 
-  const result = addStudentsBatch(validRows, batchDefaultHours.value)
+  const result = await addStudentsBatch(validRows, batchDefaultHours.value)
   students.value = result.students
 
   toast.success(`成功添加 ${result.addedCount} 名学生`)
@@ -450,10 +452,10 @@ function closeHoursModal() {
   hoursStudent.value = null
 }
 
-function saveAddHours() {
+async function saveAddHours() {
   if (!hoursStudent.value || addHoursForm.value.hours <= 0) return
 
-  students.value = addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
+  students.value = await addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
   toast.success(`已为 ${hoursStudent.value.name} 添加 ${addHoursForm.value.hours} 课时`)
   closeHoursModal()
 }
@@ -470,10 +472,10 @@ function closeStatusModal() {
   statusStudent.value = null
 }
 
-function saveStatus() {
+async function saveStatus() {
   if (!statusStudent.value) return
 
-  students.value = updateStudentStatus(statusStudent.value.id, statusForm.value.status)
+  students.value = await updateStudentStatus(statusStudent.value.id, statusForm.value.status)
   closeStatusModal()
 }
 

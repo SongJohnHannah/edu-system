@@ -90,14 +90,14 @@ const student = ref(null)
 const records = ref([])
 const filterType = ref('')
 
-onMounted(() => {
+onMounted(async () => {
   const studentId = route.query.studentId
   if (!studentId) {
     router.push('/students')
     return
   }
 
-  const students = getStudents()
+  const students = await getStudents() || []
   student.value = students.find(s => s.id === studentId)
 
   if (!student.value) {
@@ -105,7 +105,7 @@ onMounted(() => {
     return
   }
 
-  records.value = getHourRecordsByStudent(studentId)
+  records.value = await getHourRecordsByStudent(studentId) || []
 })
 
 const filteredRecords = computed(() => {

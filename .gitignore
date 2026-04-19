@@ -22,3 +22,7 @@ npm-debug.log*
 # Local env
 .env
 .env.local
+
+# Server
+server/node_modules/
+server/.env

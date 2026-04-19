@@ -32,6 +32,7 @@
         </div>
         <div class="teacher-actions">
           <button class="btn btn-text" @click="editTeacher(teacher)">编辑</button>
+          <button class="btn btn-text" v-if="isAdmin && teacher.userId" @click="openAccountModal(teacher)">账户</button>
           <button class="btn btn-text" style="color: var(--color-danger)" @click="removeTeacher(teacher.id)">删除</button>
         </div>
       </div>
@@ -62,6 +63,9 @@
             <label>备注</label>
             <textarea class="input" v-model="form.remark" rows="3" placeholder="其他说明"></textarea>
           </div>
+          <div class="form-hint" v-if="!editingTeacher">
+            添加教师后将自动创建登录账号，默认密码：<strong>123456</strong>
+          </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
             <button type="submit" class="btn btn-primary">保存</button>
@@ -81,6 +85,49 @@
         </div>
       </div>
     </div>
+
+    <!-- 账户管理弹窗 -->
+    <div class="modal-overlay" v-if="showAccountModal" @click.self="showAccountModal = false">
+      <div class="modal">
+        <h2 class="modal-title">教师账户管理</h2>
+        <form @submit.prevent="saveAccount">
+          <div class="form-group">
+            <label>姓名</label>
+            <input type="text" class="input" v-model="accountForm.displayName" required />
+          </div>
+          <div class="form-group">
+            <label>手机号</label>
+            <input type="tel" class="input" v-model="accountForm.phone" />
+          </div>
+          <div class="form-group">
+            <label>重置密码（留空则不修改）</label>
+            <input type="password" class="input" v-model="accountForm.newPassword" placeholder="输入新密码（至少6位）" minlength="6" />
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" @click="showAccountModal = false">取消</button>
+            <button type="submit" class="btn btn-primary">保存</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- 创建成功提示弹窗 -->
+    <div class="modal-overlay" v-if="showSuccessModal">
+      <div class="modal modal-sm">
+        <h2 class="modal-title">教师创建成功</h2>
+        <div class="success-info">
+          <p>已为该教师创建登录账号：</p>
+          <div class="success-detail">
+            <div class="success-row"><span class="success-label">登录账号</span><span class="success-value">{{ successInfo.username }}</span></div>
+            <div class="success-row"><span class="success-label">默认密码</span><span class="success-value success-password">{{ successInfo.password }}</span></div>
+          </div>
+          <p class="success-hint">请告知教师及时修改密码</p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" @click="showSuccessModal = false">知道了</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -88,6 +135,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { getTeachers, addTeacher, updateTeacher, deleteTeacher } from '../utils/storage'
 import { getCourses } from '../utils/storage'
+import { api } from '../utils/api.js'
+import { useToast } from '../composables/useToast'
+
+const useApi = import.meta.env.VITE_USE_API === 'true'
+const isAdmin = ref(false)
+const toast = useToast()
 
 const teachers = ref([])
 const courses = ref([])
@@ -95,6 +148,9 @@ const searchText = ref('')
 const showModal = ref(false)
 const editingTeacher = ref(null)
 const showConfirmModal = ref(false)
+const showAccountModal = ref(false)
+const showSuccessModal = ref(false)
+const successInfo = ref({ username: '', password: '' })
 const deleteTargetId = ref('')
 const deleteTargetName = ref('')
 const form = ref({
@@ -103,10 +159,26 @@ const form = ref({
   subject: '',
   remark: ''
 })
+const accountForm = ref({
+  userId: '',
+  displayName: '',
+  phone: '',
+  newPassword: ''
+})
 
-onMounted(() => {
-  teachers.value = getTeachers()
-  courses.value = getCourses()
+onMounted(async () => {
+  const [t, c] = await Promise.all([getTeachers(), getCourses()])
+  teachers.value = t || []
+  courses.value = c || []
+  if (useApi) {
+    const userStr = localStorage.getItem('user')
+    if (userStr) {
+      try {
+        const user = JSON.parse(userStr)
+        isAdmin.value = user.role === 'admin'
+      } catch {}
+    }
+  }
 })
 
 const filteredTeachers = computed(() => {
@@ -125,11 +197,17 @@ function editTeacher(teacher) {
   showModal.value = true
 }
 
-function saveTeacher() {
+async function saveTeacher() {
   if (editingTeacher.value) {
-    teachers.value = updateTeacher(editingTeacher.value.id, form.value)
+    teachers.value = await updateTeacher(editingTeacher.value.id, form.value)
   } else {
-    teachers.value = addTeacher(form.value)
+    const result = await addTeacher(form.value)
+    teachers.value = result.students || result
+    // API 模式下显示默认密码
+    if (useApi && result.defaultPassword) {
+      successInfo.value = { username: result.username, password: result.defaultPassword }
+      showSuccessModal.value = true
+    }
   }
   closeModal()
 }
@@ -142,9 +220,33 @@ function removeTeacher(id) {
   showConfirmModal.value = true
 }
 
-function confirmDeleteTeacher() {
-  teachers.value = deleteTeacher(deleteTargetId.value)
+async function confirmDeleteTeacher() {
+  teachers.value = await deleteTeacher(deleteTargetId.value)
   showConfirmModal.value = false
+}
+
+function openAccountModal(teacher) {
+  accountForm.value = {
+    userId: teacher.userId,
+    displayName: teacher.name,
+    phone: teacher.phone || '',
+    newPassword: ''
+  }
+  showAccountModal.value = true
+}
+
+async function saveAccount() {
+  try {
+    const { userId, displayName, phone, newPassword } = accountForm.value
+    await api.put(`/auth/users/${userId}`, { displayName, phone })
+    if (newPassword && newPassword.length >= 6) {
+      await api.put(`/auth/users/${userId}/password`, { newPassword })
+    }
+    showAccountModal.value = false
+    teachers.value = await getTeachers() || []
+  } catch (err) {
+    toast.error(err.message || '保存失败')
+  }
 }
 
 function closeModal() {
@@ -316,6 +418,67 @@ function closeModal() {
   font-size: 14px;
   color: var(--color-text-secondary);
   line-height: 1.6;
+}
+
+.form-hint {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  line-height: 1.5;
+}
+
+.form-hint strong {
+  color: var(--color-primary);
+}
+
+.success-info {
+  margin-bottom: 8px;
+}
+
+.success-info p {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin: 0 0 12px;
+}
+
+.success-detail {
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+
+.success-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.success-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.success-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.success-password {
+  color: var(--color-primary);
+  font-family: monospace;
+  letter-spacing: 1px;
+}
+
+.success-hint {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-align: center;
+  margin: 0;
 }
 
 @media (max-width: 768px) {

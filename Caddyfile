@@ -1,0 +1,30 @@
+# 嘉言思听教务系统 - Caddy 反向代理配置
+# 将此配置添加到你现有的 Caddyfile 中
+
+readbook.weiguandu.cn {
+    # 前端静态文件
+    root * /home/song/www/edu-system/dist
+
+    # 压缩
+    encode gzip zstd
+
+    # 带 hash 的静态资源长期缓存（更新时 hash 变化，不会缓存旧版本）
+    @static path *.js *.css *.woff2 *.wasm *.svg *.ico
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    # index.html 永不缓存（确保每次拿到最新版本引用）
+    @html path /index.html
+    header @html Cache-Control "no-cache, no-store, must-revalidate"
+
+    file_server
+
+    # API 反向代理到后端 Express 服务
+    handle /edusystem/api/* {
+        reverse_proxy localhost:3001
+    }
+
+    # SPA 路由回退（所有非文件请求返回 index.html）
+    handle {
+        try_files {path} /index.html
+    }
+}

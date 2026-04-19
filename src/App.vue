@@ -1,8 +1,5 @@
 <template>
   <div class="app">
-    <!-- 锁屏 -->
-    <LockScreen />
-
     <header class="header" :class="{ 'header-electron': isElectronEnv }">
       <div class="header-content">
         <div class="logo">
@@ -10,25 +7,32 @@
             <rect width="100" height="100" rx="20" fill="#1d1d1f"/>
             <text x="50" y="65" font-size="50" text-anchor="middle" fill="white" font-family="Inter, sans-serif" font-weight="600">教</text>
           </svg>
-          <span class="logo-text">教务管理系统 <span class="version">v{{ appVersion }}</span></span>
+          <span class="logo-text">嘉言思听教务系统 <span class="version">v{{ appVersion }}</span></span>
         </div>
         <nav class="nav">
           <router-link to="/" class="nav-item" exact-active-class="active">首页</router-link>
           <router-link to="/students" class="nav-item" active-class="active">学生</router-link>
-          <router-link to="/teachers" class="nav-item" active-class="active">教师</router-link>
+          <router-link to="/teachers" class="nav-item" active-class="active" v-if="isAdmin">教师</router-link>
           <router-link to="/courses" class="nav-item" active-class="active">课程安排</router-link>
           <router-link to="/attendance" class="nav-item" active-class="active">点名</router-link>
           <router-link to="/calendar" class="nav-item" active-class="active">日历</router-link>
           <router-link to="/teacher-stats" class="nav-item" active-class="active">教师统计</router-link>
         </nav>
         <div class="header-actions">
-          <button class="btn btn-secondary btn-sm" @click="showBackupModal = true">
+          <router-link to="/profile" class="user-info" v-if="useApi && authUser">
+            {{ authUser.displayName }}
+            <span class="user-role" :class="authUser.role">{{ roleLabel }}</span>
+          </router-link>
+          <button class="btn btn-secondary btn-sm" @click="showBackupModal = true" v-if="isAdmin">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
             <span>数据备份</span>
+          </button>
+          <button class="btn btn-secondary btn-sm" @click="handleLogout" v-if="useApi && authUser">
+            退出登录
           </button>
         </div>
       </div>
@@ -92,10 +96,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import LockScreen from './components/LockScreen.vue'
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import Toast from './components/Toast.vue'
 import { downloadBackup, importData, getStorePath, checkIsElectron } from './utils/storage'
+import { useToast } from './composables/useToast'
+
+const useApi = import.meta.env.VITE_USE_API === 'true'
+const router = useRouter()
+const toast = useToast()
 
 const showBackupModal = ref(false)
 const importResult = ref(null)
@@ -103,36 +112,68 @@ const isElectronEnv = ref(false)
 const storePath = ref('')
 const appVersion = __APP_VERSION__
 
+const authUser = ref(null)
+
 onMounted(async () => {
   isElectronEnv.value = checkIsElectron()
   if (isElectronEnv.value) {
     storePath.value = await getStorePath() || ''
   }
+  if (useApi) {
+    const { useAuthStore } = await import('./stores/auth.js')
+    const authStore = useAuthStore()
+    authUser.value = authStore.user
+    authStore.$subscribe(() => {
+      authUser.value = authStore.user
+    })
+  }
 })
 
-function handleBackup() {
-  downloadBackup()
+const isAdmin = computed(() => {
+  if (!useApi) return true
+  return authUser.value?.role === 'admin'
+})
+
+const roleLabel = computed(() => {
+  if (!authUser.value) return ''
+  return authUser.value.role === 'admin' ? '管理员' : '教师'
+})
+
+function handleLogout() {
+  if (useApi) {
+    import('./stores/auth.js').then(({ useAuthStore }) => {
+      const authStore = useAuthStore()
+      authStore.logout()
+      router.push('/login')
+    })
+  }
 }
 
-function handleImport(event) {
+async function handleBackup() {
+  try {
+    await downloadBackup()
+    toast.success('备份导出成功')
+  } catch (err) {
+    toast.error('导出失败: ' + err.message)
+  }
+}
+
+async function handleImport(event) {
   const file = event.target.files[0]
   if (!file) return
 
   const reader = new FileReader()
-  reader.onload = (e) => {
-    const result = importData(e.target.result)
+  reader.onload = async (e) => {
+    const result = await importData(e.target.result)
     importResult.value = result
 
     if (result.success) {
-      // 刷新页面以加载新数据
       setTimeout(() => {
         window.location.reload()
       }, 1500)
     }
   }
   reader.readAsText(file)
-
-  // 清空文件输入，允许重复选择同一文件
   event.target.value = ''
 }
 </script>
@@ -228,6 +269,41 @@ function handleImport(event) {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.user-info {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: var(--transition);
+}
+
+.user-info:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.user-role {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.user-role.admin {
+  background: rgba(0, 113, 227, 0.1);
+  color: var(--color-primary);
+}
+
+.user-role.teacher {
+  background: rgba(52, 199, 89, 0.1);
+  color: var(--color-success);
 }
 
 .btn-sm {

@@ -26,7 +26,7 @@
           </div>
           <span>添加学生</span>
         </router-link>
-        <router-link to="/teachers" class="action-card">
+        <router-link to="/teachers" class="action-card" v-if="isAdmin">
           <div class="action-icon teachers">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -69,7 +69,7 @@
           </div>
         </router-link>
 
-        <router-link to="/teachers" class="stat-card">
+        <router-link to="/teachers" class="stat-card" v-if="isAdmin">
           <div class="stat-icon teachers">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -156,6 +156,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { getStudents, getTeachers, getCourses, getAttendance } from '../utils/storage'
 
+const useApi = import.meta.env.VITE_USE_API === 'true'
+const isAdmin = computed(() => {
+  if (!useApi) return true
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null')
+    return user?.role === 'admin'
+  } catch { return false }
+})
+
 const students = ref([])
 const teachers = ref([])
 const courses = ref([])
@@ -166,11 +175,14 @@ const today = new Date()
 const todayStr = today.toISOString().split('T')[0]
 const todayWeekday = today.getDay() || 7  // 0 转为 7（周日）
 
-onMounted(() => {
-  students.value = getStudents()
-  teachers.value = getTeachers()
-  courses.value = getCourses()
-  attendance.value = getAttendance()
+onMounted(async () => {
+  const [s, t, c, a] = await Promise.all([
+    getStudents(), getTeachers(), getCourses(), getAttendance()
+  ])
+  students.value = s || []
+  teachers.value = t || []
+  courses.value = c || []
+  attendance.value = a || []
 })
 
 // 今日课程

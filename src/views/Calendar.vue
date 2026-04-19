@@ -96,36 +96,53 @@ const tooltipData = ref({
 
 const weekDays = ['日', '一', '二', '三', '四', '五', '六']
 
-onMounted(() => {
-  attendanceRecords.value = getAttendance()
-  courses.value = getCourses()
-  students.value = getStudents()
-  teachers.value = getTeachers()
+onMounted(async () => {
+  const [a, c, s, t] = await Promise.all([
+    getAttendance(), getCourses(), getStudents(), getTeachers()
+  ])
+  attendanceRecords.value = a || []
+  courses.value = c || []
+  students.value = s || []
+  teachers.value = t || []
 
-  // 默认选中今天
   selectedDate.value = new Date().toISOString().split('T')[0]
 })
 
 const currentYear = computed(() => currentDate.value.getFullYear())
 const currentMonth = computed(() => currentDate.value.getMonth())
 
-// 获取某天的课程（根据星期几）
-function getCoursesOnDate(dateStr) {
-  const date = new Date(dateStr)
-  const weekday = date.getDay() // 0-6, 0是周日
-  const weekdayMap = { 0: 7, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6 } // 转换为 1-7
+// Pre-build attendance map for O(N) instead of O(42*N)
+const attendanceMap = computed(() => {
+  const map = new Map()
+  for (const r of attendanceRecords.value) {
+    const key = r.date
+    if (!map.has(key)) map.set(key, { count: 0, records: [] })
+    const entry = map.get(key)
+    entry.count += r.studentIds.length
+    entry.records.push(r)
+  }
+  return map
+})
 
-  return courses.value
-    .filter(c => c.weekday === weekdayMap[weekday])
-    .map(c => ({
-      ...c,
-      teacherName: getTeacherName(c.teacherId)
-    }))
-}
+// Pre-build weekday-to-courses map
+const weekdayCourseMap = computed(() => {
+  const map = new Map()
+  for (const c of courses.value) {
+    if (!map.has(c.weekday)) map.set(c.weekday, [])
+    map.get(c.weekday).push({ ...c, teacherName: getTeacherName(c.teacherId) })
+  }
+  return map
+})
 
 function getTeacherName(teacherId) {
   const teacher = teachers.value.find(t => t.id === teacherId)
   return teacher ? teacher.name : '未知教师'
+}
+
+function getCoursesOnDate(dateStr) {
+  const date = new Date(dateStr)
+  const weekday = date.getDay() === 0 ? 7 : date.getDay()
+  return weekdayCourseMap.value.get(weekday) || []
 }
 
 const calendarDays = computed(() => {
@@ -135,50 +152,39 @@ const calendarDays = computed(() => {
   const lastDay = new Date(year, month + 1, 0)
   const days = []
 
-  // 上个月的天数
   const firstDayWeek = firstDay.getDay()
   const prevMonthLastDay = new Date(year, month, 0).getDate()
 
   for (let i = firstDayWeek - 1; i >= 0; i--) {
     const day = prevMonthLastDay - i
     const dateStr = formatDate(year, month - 1, day)
+    const att = attendanceMap.value.get(dateStr)
     days.push({
-      day,
-      dateStr,
-      otherMonth: true,
-      isToday: false,
-      hasAttendance: hasAttendanceOnDate(dateStr),
-      attendanceCount: getAttendanceCount(dateStr),
+      day, dateStr, otherMonth: true, isToday: false,
+      hasAttendance: !!att, attendanceCount: att?.count || 0,
       courses: getCoursesOnDate(dateStr)
     })
   }
 
-  // 当月的天数
   const today = new Date()
   for (let i = 1; i <= lastDay.getDate(); i++) {
     const dateStr = formatDate(year, month, i)
+    const att = attendanceMap.value.get(dateStr)
     days.push({
-      day: i,
-      dateStr,
-      otherMonth: false,
+      day: i, dateStr, otherMonth: false,
       isToday: today.getFullYear() === year && today.getMonth() === month && today.getDate() === i,
-      hasAttendance: hasAttendanceOnDate(dateStr),
-      attendanceCount: getAttendanceCount(dateStr),
+      hasAttendance: !!att, attendanceCount: att?.count || 0,
       courses: getCoursesOnDate(dateStr)
     })
   }
 
-  // 下个月的天数
   const remainingDays = 42 - days.length
   for (let i = 1; i <= remainingDays; i++) {
     const dateStr = formatDate(year, month + 1, i)
+    const att = attendanceMap.value.get(dateStr)
     days.push({
-      day: i,
-      dateStr,
-      otherMonth: true,
-      isToday: false,
-      hasAttendance: hasAttendanceOnDate(dateStr),
-      attendanceCount: getAttendanceCount(dateStr),
+      day: i, dateStr, otherMonth: true, isToday: false,
+      hasAttendance: !!att, attendanceCount: att?.count || 0,
       courses: getCoursesOnDate(dateStr)
     })
   }
@@ -188,11 +194,10 @@ const calendarDays = computed(() => {
 
 const selectedDateInfo = computed(() => {
   if (!selectedDate.value) return null
-
-  const records = attendanceRecords.value.filter(r => r.date === selectedDate.value)
+  const att = attendanceMap.value.get(selectedDate.value)
   return {
     dateStr: selectedDate.value,
-    records
+    records: att?.records || attendanceRecords.value.filter(r => r.date === selectedDate.value)
   }
 })
 
@@ -200,15 +205,6 @@ function formatDate(year, month, day) {
   const m = String(month + 1).padStart(2, '0')
   const d = String(day).padStart(2, '0')
   return `${year}-${m}-${d}`
-}
-
-function hasAttendanceOnDate(dateStr) {
-  return attendanceRecords.value.some(r => r.date === dateStr)
-}
-
-function getAttendanceCount(dateStr) {
-  const records = attendanceRecords.value.filter(r => r.date === dateStr)
-  return records.reduce((sum, r) => sum + r.studentIds.length, 0)
 }
 
 function getCourseName(courseId) {

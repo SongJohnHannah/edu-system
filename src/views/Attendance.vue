@@ -136,6 +136,7 @@
         <div class="empty-history" v-else>
           <p>暂无点名记录</p>
         </div>
+        <button v-if="hasMoreRecords" class="btn btn-secondary load-more-btn" @click="loadMoreRecords">加载更多记录</button>
       </div>
     </template>
   </div>
@@ -143,7 +144,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getCourses, getStudents, getTeachers, getAttendance, addAttendance, deductHours, removeStudentsFromRecord } from '../utils/storage'
+import { getCourses, getStudents, getTeachers, getAttendance, getAttendancePage, addAttendance, deductHours, removeStudentsFromRecord } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
@@ -151,6 +152,7 @@ const courses = ref([])
 const students = ref([])
 const teachers = ref([])
 const attendanceRecords = ref([])
+const hasMoreRecords = ref(false)
 const selectedCourseId = ref('')
 const filterCourseId = ref('')
 const filterMonth = ref(new Date().toISOString().slice(0, 7))
@@ -181,12 +183,26 @@ function handleConfirmClick() {
 
 const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
 
-onMounted(() => {
-  courses.value = getCourses()
-  students.value = getStudents()
-  teachers.value = getTeachers()
-  attendanceRecords.value = getAttendance().slice(-20).reverse()
+onMounted(async () => {
+  const [c, s, t, page] = await Promise.all([
+    getCourses(), getStudents(), getTeachers(), getAttendancePage({ limit: 50 })
+  ])
+  courses.value = c || []
+  students.value = s || []
+  teachers.value = t || []
+  const pageData = page || {}
+  attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
+  hasMoreRecords.value = pageData.hasMore || false
 })
+
+async function loadMoreRecords() {
+  const currentCount = attendanceRecords.value.length
+  const page = await getAttendancePage({ limit: 50, offset: currentCount })
+  const pageData = page || {}
+  const newData = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
+  attendanceRecords.value = [...newData, ...attendanceRecords.value]
+  hasMoreRecords.value = pageData.hasMore || false
+}
 
 const selectedCourse = computed(() => {
   return courses.value.find(c => c.id === selectedCourseId.value)
@@ -253,18 +269,13 @@ function deselectAll() {
   checkedStudents.value = []
 }
 
-function submitAttendance() {
+async function submitAttendance() {
   if (!selectedCourse.value || checkedStudents.value.length === 0) return
 
   const hoursPerStudent = selectedCourse.value.hoursPerClass || 1
 
-  // 扣除课时
-  checkedStudents.value.forEach(studentId => {
-    deductHours(studentId, hoursPerStudent)
-  })
-
-  // 记录点名
-  addAttendance({
+  // 记录点名（后端会自动扣课时）
+  await addAttendance({
     courseId: selectedCourse.value.id,
     date: new Date().toISOString().split('T')[0],
     studentIds: [...checkedStudents.value],
@@ -272,8 +283,11 @@ function submitAttendance() {
   })
 
   // 更新本地数据
-  students.value = getStudents()
-  attendanceRecords.value = getAttendance().slice(-20).reverse()
+  students.value = await getStudents() || []
+  const page = await getAttendancePage({ limit: 50 })
+  const pageData = page || {}
+  attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
+  hasMoreRecords.value = pageData.hasMore || false
 
   // 重置
   showConfirmModal.value = false
@@ -296,15 +310,15 @@ function openDeleteModal(record) {
   showDeleteModal.value = true
 }
 
-function confirmDeleteStudents() {
+async function confirmDeleteStudents() {
   if (!deleteTargetRecord.value || deleteCheckedStudents.value.length === 0) return
 
-  const result = removeStudentsFromRecord(
+  const result = await removeStudentsFromRecord(
     deleteTargetRecord.value.id,
     deleteCheckedStudents.value
   )
   attendanceRecords.value = result
-  students.value = getStudents()
+  students.value = await getStudents() || []
   showDeleteModal.value = false
 
   if (deleteCheckedStudents.value.length === (deleteTargetRecord.value.studentIds || []).length) {
@@ -615,6 +629,11 @@ function confirmDeleteStudents() {
   color: var(--color-text-secondary);
 }
 
+.load-more-btn {
+  width: 100%;
+  margin-top: 16px;
+}
+
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -656,6 +675,7 @@ function confirmDeleteStudents() {
   border-radius: var(--radius-md);
   padding: 12px 16px;
   margin-bottom: 16px;
+  text-align: center;
 }
 
 .confirm-warning p {
@@ -663,49 +683,5 @@ function confirmDeleteStudents() {
   color: #856404;
   font-size: 14px;
   font-weight: 500;
-}
-
-.confirm-warning {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: var(--radius-md);
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  text-align: center;
-}
-
-.confirm-warning p {
-  margin: 0;
-  font-size: 14px;
-  color: #856404;
-}
-
-.confirm-info p {
-  margin-bottom: 12px;
-  color: var(--color-text-secondary);
-}
-
-.confirm-info strong {
-  color: var(--color-text);
-}
-
-.modal-actions {
-  display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-}
-
-.confirm-warning {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
-  border-radius: var(--radius-md);
-  padding: 12px 16px;
-  margin-bottom: 16px;
-  color: #856404;
-}
-
-.confirm-warning p {
-  margin: 0;
-  font-size: 14px;
 }
 </style>

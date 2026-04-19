@@ -1,7 +1,7 @@
 {
   "name": "edu-system",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "教务管理系统 - 小型培训机构教务管理工具",
   "author": "EduSystem",
   "type": "module",
@@ -16,13 +16,13 @@
     "electron:build:win": "vite build && electron-builder --win"
   },
   "dependencies": {
-    "lowdb": "^7.0.1",
     "pinia": "^2.1.7",
     "sql.js": "^1.14.1",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@vitejs/plugin-vue": "^5.0.4",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",

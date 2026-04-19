@@ -51,7 +51,19 @@ export default defineConfig({
     }
   },
   server: {
+    host: '0.0.0.0',
     port: 3000,
-    open: true
+    open: true,
+    allowedHosts: ['education.weiguandu.cn'],
+    hmr: {
+      host: 'education.weiguandu.cn',
+      protocol: 'wss'
+    },
+    proxy: {
+      '/edusystem/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
+      }
+    }
   }
 })
