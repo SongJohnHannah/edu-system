@@ -127,7 +127,7 @@
         <p class="confirm-message">确定要删除课程"{{ deleteTargetName }}"吗？</p>
         <div class="modal-actions">
           <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteCourse">确认删除</button>
+          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteCourse" :disabled="submitting">{{ submitting ? '删除中...' : '确认删除' }}</button>
         </div>
       </div>
     </div>
@@ -246,8 +246,14 @@ function removeCourse(id) {
 }
 
 async function confirmDeleteCourse() {
-  courses.value = await deleteCourse(deleteTargetId.value)
-  showConfirmModal.value = false
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    courses.value = await deleteCourse(deleteTargetId.value)
+    showConfirmModal.value = false
+  } finally {
+    submitting.value = false
+  }
 }
 
 function closeModal() {

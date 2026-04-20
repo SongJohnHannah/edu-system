@@ -152,7 +152,7 @@
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" @click="closeBatchModal">取消</button>
-          <button type="button" class="btn btn-primary" @click="saveBatchStudents" :disabled="!hasValidBatchData">确认添加</button>
+          <button type="button" class="btn btn-primary" @click="saveBatchStudents" :disabled="!hasValidBatchData || submitting">{{ submitting ? '提交中...' : '确认添加' }}</button>
         </div>
       </div>
     </div>
@@ -182,7 +182,7 @@
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" @click="closeHoursModal">取消</button>
-            <button type="submit" class="btn btn-primary">确认添加</button>
+            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '提交中...' : '确认添加' }}</button>
           </div>
         </form>
       </div>
@@ -206,7 +206,7 @@
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" @click="closeStatusModal">取消</button>
-          <button type="button" class="btn btn-primary" @click="saveStatus">确认修改</button>
+          <button type="button" class="btn btn-primary" @click="saveStatus" :disabled="submitting">{{ submitting ? '提交中...' : '确认修改' }}</button>
         </div>
       </div>
     </div>
@@ -404,48 +404,47 @@ function closeBatchModal() {
 }
 
 async function saveBatchStudents() {
+  if (submitting.value) return
   const validRows = batchRows.value.filter(row => row.name && row.name.trim())
   if (validRows.length === 0) {
     toast.warning('请至少填写一个学生姓名')
     return
   }
 
-  // 检查重名
-  const existingNames = []
-  const duplicateInBatch = []
-
-  for (const row of validRows) {
-    const exists = await checkStudentNameExists(row.name.trim())
-    if (exists) {
-      existingNames.push(row.name.trim())
+  submitting.value = true
+  try {
+    // 检查重名
+    const existingNames = []
+    for (const row of validRows) {
+      const exists = await checkStudentNameExists(row.name.trim())
+      if (exists) existingNames.push(row.name.trim())
     }
-  }
 
-  // 检查批量输入内部是否有重复
-  const nameSet = new Set()
-  validRows.forEach(row => {
-    const name = row.name.trim()
-    if (nameSet.has(name)) {
-      duplicateInBatch.push(name)
+    // 检查批量输入内部是否有重复
+    const duplicateInBatch = []
+    const nameSet = new Set()
+    validRows.forEach(row => {
+      const name = row.name.trim()
+      if (nameSet.has(name)) duplicateInBatch.push(name)
+      nameSet.add(name)
+    })
+
+    if (existingNames.length > 0) {
+      toast.warning(`以下学生姓名已存在：${existingNames.join('、')}`)
+      return
     }
-    nameSet.add(name)
-  })
+    if (duplicateInBatch.length > 0) {
+      toast.warning(`批量输入中存在重复姓名：${duplicateInBatch.join('、')}`)
+      return
+    }
 
-  if (existingNames.length > 0) {
-    toast.warning(`以下学生姓名已存在：${existingNames.join('、')}`)
-    return
+    const result = await addStudentsBatch(validRows, batchDefaultHours.value)
+    students.value = result.students
+    toast.success(`成功添加 ${result.addedCount} 名学生`)
+    closeBatchModal()
+  } finally {
+    submitting.value = false
   }
-
-  if (duplicateInBatch.length > 0) {
-    toast.warning(`批量输入中存在重复姓名：${duplicateInBatch.join('、')}`)
-    return
-  }
-
-  const result = await addStudentsBatch(validRows, batchDefaultHours.value)
-  students.value = result.students
-
-  toast.success(`成功添加 ${result.addedCount} 名学生`)
-  closeBatchModal()
 }
 
 // 添加课时
@@ -461,11 +460,16 @@ function closeHoursModal() {
 }
 
 async function saveAddHours() {
-  if (!hoursStudent.value || addHoursForm.value.hours <= 0) return
+  if (!hoursStudent.value || addHoursForm.value.hours <= 0 || submitting.value) return
 
-  students.value = await addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
-  toast.success(`已为 ${hoursStudent.value.name} 添加 ${addHoursForm.value.hours} 课时`)
-  closeHoursModal()
+  submitting.value = true
+  try {
+    students.value = await addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
+    toast.success(`已为 ${hoursStudent.value.name} 添加 ${addHoursForm.value.hours} 课时`)
+    closeHoursModal()
+  } finally {
+    submitting.value = false
+  }
 }
 
 // 状态修改
@@ -481,10 +485,15 @@ function closeStatusModal() {
 }
 
 async function saveStatus() {
-  if (!statusStudent.value) return
+  if (!statusStudent.value || submitting.value) return
 
-  students.value = await updateStudentStatus(statusStudent.value.id, statusForm.value.status)
-  closeStatusModal()
+  submitting.value = true
+  try {
+    students.value = await updateStudentStatus(statusStudent.value.id, statusForm.value.status)
+    closeStatusModal()
+  } finally {
+    submitting.value = false
+  }
 }
 
 // 跳转到课时历史

@@ -81,7 +81,7 @@
         <p class="confirm-message">确定要删除教师"{{ deleteTargetName }}"吗？</p>
         <div class="modal-actions">
           <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteTeacher">确认删除</button>
+          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteTeacher" :disabled="submitting">{{ submitting ? '删除中...' : '确认删除' }}</button>
         </div>
       </div>
     </div>
@@ -105,7 +105,7 @@
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" @click="showAccountModal = false">取消</button>
-            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
           </div>
         </form>
       </div>
@@ -229,8 +229,14 @@ function removeTeacher(id) {
 }
 
 async function confirmDeleteTeacher() {
-  teachers.value = await deleteTeacher(deleteTargetId.value)
-  showConfirmModal.value = false
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    teachers.value = await deleteTeacher(deleteTargetId.value)
+    showConfirmModal.value = false
+  } finally {
+    submitting.value = false
+  }
 }
 
 function openAccountModal(teacher) {
@@ -244,6 +250,8 @@ function openAccountModal(teacher) {
 }
 
 async function saveAccount() {
+  if (submitting.value) return
+  submitting.value = true
   try {
     const { userId, displayName, phone, newPassword } = accountForm.value
     await api.put(`/auth/users/${userId}`, { displayName, phone })
@@ -254,6 +262,8 @@ async function saveAccount() {
     teachers.value = await getTeachers() || []
   } catch (err) {
     toast.error(err.message || '保存失败')
+  } finally {
+    submitting.value = false
   }
 }
 

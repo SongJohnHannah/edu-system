@@ -96,8 +96,8 @@
           </div>
           <div class="modal-actions">
             <button class="btn btn-secondary" @click="showDeleteModal = false">取消</button>
-            <button class="btn btn-primary" style="background: var(--color-danger);" @click="confirmDeleteStudents" :disabled="deleteCheckedStudents.length === 0">
-              确认删除 ({{ deleteCheckedStudents.length }} 人)
+            <button class="btn btn-primary" style="background: var(--color-danger);" @click="confirmDeleteStudents" :disabled="deleteCheckedStudents.length === 0 || submitting">
+              {{ submitting ? '删除中...' : `确认删除 (${deleteCheckedStudents.length} 人)` }}
             </button>
           </div>
         </div>
@@ -319,20 +319,25 @@ function openDeleteModal(record) {
 }
 
 async function confirmDeleteStudents() {
-  if (!deleteTargetRecord.value || deleteCheckedStudents.value.length === 0) return
+  if (!deleteTargetRecord.value || deleteCheckedStudents.value.length === 0 || submitting.value) return
 
-  const result = await removeStudentsFromRecord(
-    deleteTargetRecord.value.id,
-    deleteCheckedStudents.value
-  )
-  attendanceRecords.value = result
-  students.value = await getStudents() || []
-  showDeleteModal.value = false
+  submitting.value = true
+  try {
+    const result = await removeStudentsFromRecord(
+      deleteTargetRecord.value.id,
+      deleteCheckedStudents.value
+    )
+    attendanceRecords.value = result
+    students.value = await getStudents() || []
+    showDeleteModal.value = false
 
-  if (deleteCheckedStudents.value.length === (deleteTargetRecord.value.studentIds || []).length) {
-    toast.success('已删除整条点名记录并还原所有学生课时。')
-  } else {
-    toast.success(`已删除 ${deleteCheckedStudents.value.length} 名学生并还原课时。`)
+    if (deleteCheckedStudents.value.length === (deleteTargetRecord.value.studentIds || []).length) {
+      toast.success('已删除整条点名记录并还原所有学生课时。')
+    } else {
+      toast.success(`已删除 ${deleteCheckedStudents.value.length} 名学生并还原课时。`)
+    }
+  } finally {
+    submitting.value = false
   }
 }
 </script>
