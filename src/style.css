@@ -174,3 +174,29 @@ body {
 .fade-in {
   animation: fadeIn 0.4s ease-out;
 }
+
+/* ===== 移动端全局适配 ===== */
+@media (max-width: 768px) {
+  .btn {
+    padding: 10px 16px;
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .input {
+    font-size: 16px; /* 防止 iOS 自动缩放 */
+  }
+
+  .table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table th,
+  .table td {
+    padding: 12px 10px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+}

@@ -74,7 +74,7 @@
           </div>
           <div class="modal-actions">
             <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-            <button class="btn btn-primary" @click="submitAttendance">确认点名</button>
+            <button class="btn btn-primary" @click="submitAttendance" :disabled="submitting">{{ submitting ? '提交中...' : '确认点名' }}</button>
           </div>
         </div>
       </div>
@@ -269,31 +269,39 @@ function deselectAll() {
   checkedStudents.value = []
 }
 
+const submitting = ref(false)
+
 async function submitAttendance() {
   if (!selectedCourse.value || checkedStudents.value.length === 0) return
+  if (submitting.value) return
 
-  const hoursPerStudent = selectedCourse.value.hoursPerClass || 1
+  submitting.value = true
+  try {
+    const hoursPerStudent = selectedCourse.value.hoursPerClass || 1
 
-  // 记录点名（后端会自动扣课时）
-  await addAttendance({
-    courseId: selectedCourse.value.id,
-    date: new Date().toISOString().split('T')[0],
-    studentIds: [...checkedStudents.value],
-    hoursDeducted: hoursPerStudent
-  })
+    // 记录点名（后端会自动扣课时）
+    await addAttendance({
+      courseId: selectedCourse.value.id,
+      date: new Date().toISOString().split('T')[0],
+      studentIds: [...checkedStudents.value],
+      hoursDeducted: hoursPerStudent
+    })
 
-  // 更新本地数据
-  students.value = await getStudents() || []
-  const page = await getAttendancePage({ limit: 50 })
-  const pageData = page || {}
-  attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
-  hasMoreRecords.value = pageData.hasMore || false
+    // 更新本地数据
+    students.value = await getStudents() || []
+    const page = await getAttendancePage({ limit: 50 })
+    const pageData = page || {}
+    attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
+    hasMoreRecords.value = pageData.hasMore || false
 
-  // 重置
-  showConfirmModal.value = false
-  checkedStudents.value = []
-  toast.success('点名成功！已扣除对应课时。')
-  loadCourseStudents()
+    // 重置
+    showConfirmModal.value = false
+    checkedStudents.value = []
+    toast.success('点名成功！已扣除对应课时。')
+    loadCourseStudents()
+  } finally {
+    submitting.value = false
+  }
 }
 
 // 选择性删除相关

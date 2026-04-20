@@ -68,7 +68,7 @@
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
           </div>
         </form>
       </div>
@@ -197,19 +197,27 @@ function editTeacher(teacher) {
   showModal.value = true
 }
 
+const submitting = ref(false)
+
 async function saveTeacher() {
-  if (editingTeacher.value) {
-    teachers.value = await updateTeacher(editingTeacher.value.id, form.value)
-  } else {
-    const result = await addTeacher(form.value)
-    teachers.value = result.students || result
-    // API 模式下显示默认密码
-    if (useApi && result.defaultPassword) {
-      successInfo.value = { username: result.username, password: result.defaultPassword }
-      showSuccessModal.value = true
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    if (editingTeacher.value) {
+      teachers.value = await updateTeacher(editingTeacher.value.id, form.value)
+    } else {
+      const result = await addTeacher(form.value)
+      teachers.value = result.students || result
+      // API 模式下显示默认密码
+      if (useApi && result.defaultPassword) {
+        successInfo.value = { username: result.username, password: result.defaultPassword }
+        showSuccessModal.value = true
+      }
     }
+    closeModal()
+  } finally {
+    submitting.value = false
   }
-  closeModal()
 }
 
 function removeTeacher(id) {

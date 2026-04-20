@@ -114,7 +114,7 @@
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
           </div>
         </form>
       </div>
@@ -220,13 +220,21 @@ function editCourse(course) {
   showModal.value = true
 }
 
+const submitting = ref(false)
+
 async function saveCourse() {
-  if (editingCourse.value) {
-    courses.value = await updateCourse(editingCourse.value.id, form.value)
-  } else {
-    courses.value = await addCourse(form.value)
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    if (editingCourse.value) {
+      courses.value = await updateCourse(editingCourse.value.id, form.value)
+    } else {
+      courses.value = await addCourse(form.value)
+    }
+    closeModal()
+  } finally {
+    submitting.value = false
   }
-  closeModal()
 }
 
 function removeCourse(id) {

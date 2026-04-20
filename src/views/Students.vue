@@ -118,7 +118,7 @@
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-            <button type="submit" class="btn btn-primary">保存</button>
+            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
           </div>
         </form>
       </div>
@@ -339,20 +339,28 @@ function editStudent(student) {
   showModal.value = true
 }
 
-async function saveStudent() {
-  // 检查重名
-  const exists = await checkStudentNameExists(form.value.name, editingStudent.value?.id)
-  if (exists) {
-    toast.warning(`学生"${form.value.name}"已存在，请使用其他姓名`)
-    return
-  }
+const submitting = ref(false)
 
-  if (editingStudent.value) {
-    students.value = await updateStudent(editingStudent.value.id, form.value)
-  } else {
-    students.value = await addStudent(form.value)
+async function saveStudent() {
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    // 检查重名
+    const exists = await checkStudentNameExists(form.value.name, editingStudent.value?.id)
+    if (exists) {
+      toast.warning(`学生"${form.value.name}"已存在，请使用其他姓名`)
+      return
+    }
+
+    if (editingStudent.value) {
+      students.value = await updateStudent(editingStudent.value.id, form.value)
+    } else {
+      students.value = await addStudent(form.value)
+    }
+    closeModal()
+  } finally {
+    submitting.value = false
   }
-  closeModal()
 }
 
 function removeStudent(student) {

@@ -508,4 +508,71 @@ function hideTooltip() {
   padding: 32px;
   color: var(--color-text-secondary);
 }
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    gap: 12px;
+  }
+
+  .page-title {
+    font-size: 22px;
+  }
+
+  .calendar-nav {
+    width: 100%;
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .calendar-nav .btn {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .current-month {
+    font-size: 15px;
+    min-width: auto;
+  }
+
+  .calendar-container {
+    padding: 12px;
+    border-radius: var(--radius-md);
+  }
+
+  .calendar-body {
+    gap: 2px;
+  }
+
+  .calendar-day {
+    aspect-ratio: 1;
+    min-height: 0;
+    border-radius: 6px;
+  }
+
+  .day-number {
+    font-size: 13px;
+  }
+
+  .attendance-count {
+    font-size: 9px;
+  }
+
+  .attendance-dot {
+    width: 4px;
+    height: 4px;
+    top: 4px;
+    right: 4px;
+  }
+
+  .calendar-tooltip {
+    display: none;
+  }
+
+  .attendance-detail {
+    padding: 16px;
+  }
+}
 </style>

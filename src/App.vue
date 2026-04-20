@@ -1,6 +1,7 @@
 <template>
   <div class="app">
-    <header class="header" :class="{ 'header-electron': isElectronEnv }">
+    <!-- 桌面端顶部导航 -->
+    <header v-if="!isLoginPage" class="header desktop-nav" :class="{ 'header-electron': isElectronEnv }">
       <div class="header-content">
         <div class="logo">
           <svg width="32" height="32" viewBox="0 0 100 100">
@@ -37,6 +38,41 @@
         </div>
       </div>
     </header>
+
+    <!-- 移动端顶部栏 -->
+    <header v-if="!isLoginPage" class="mobile-header">
+      <div class="mobile-header-content">
+        <div class="mobile-logo">
+          <svg width="28" height="28" viewBox="0 0 100 100">
+            <rect width="100" height="100" rx="20" fill="#1d1d1f"/>
+            <text x="50" y="65" font-size="50" text-anchor="middle" fill="white" font-family="Inter, sans-serif" font-weight="600">教</text>
+          </svg>
+          <span class="mobile-title">{{ currentPageTitle }}</span>
+        </div>
+        <div class="mobile-actions">
+          <button class="mobile-icon-btn" @click="showBackupModal = true" v-if="isAdmin" title="数据备份">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+          <router-link to="/profile" class="mobile-icon-btn" v-if="useApi && authUser" title="个人资料">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          </router-link>
+          <button class="mobile-icon-btn" @click="handleLogout" v-if="useApi && authUser" title="退出">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
     <main class="main">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
@@ -44,6 +80,83 @@
         </transition>
       </router-view>
     </main>
+
+    <!-- 移动端底部 Tab 栏 -->
+    <nav v-if="!isLoginPage" class="mobile-tab-bar">
+      <router-link to="/" class="tab-item" exact-active-class="tab-active">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        <span>首页</span>
+      </router-link>
+      <router-link to="/students" class="tab-item" active-class="tab-active">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        <span>学生</span>
+      </router-link>
+      <router-link to="/attendance" class="tab-item" active-class="tab-active">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M9 11l3 3L22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        <span>点名</span>
+      </router-link>
+      <router-link to="/courses" class="tab-item" active-class="tab-active">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        <span>课程</span>
+      </router-link>
+      <router-link to="/calendar" class="tab-item" active-class="tab-active">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        <span>日历</span>
+      </router-link>
+      <router-link to="/more" class="tab-item" active-class="tab-active" @click.prevent="showMoreMenu = !showMoreMenu">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
+        </svg>
+        <span>更多</span>
+      </router-link>
+    </nav>
+
+    <!-- 移动端更多菜单 -->
+    <div class="mobile-more-overlay" v-if="showMoreMenu" @click="showMoreMenu = false">
+      <div class="mobile-more-menu" @click.stop>
+        <router-link to="/teachers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span>教师管理</span>
+        </router-link>
+        <router-link to="/teacher-stats" class="more-item" @click="showMoreMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+          </svg>
+          <span>教师统计</span>
+        </router-link>
+        <router-link to="/profile" class="more-item" @click="showMoreMenu = false" v-if="useApi && authUser">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span>个人资料</span>
+        </router-link>
+      </div>
+    </div>
 
     <Toast />
     <!-- 数据备份弹窗 -->
@@ -107,12 +220,31 @@ const router = useRouter()
 const toast = useToast()
 
 const showBackupModal = ref(false)
+const showMoreMenu = ref(false)
 const importResult = ref(null)
 const isElectronEnv = ref(false)
 const storePath = ref('')
 const appVersion = __APP_VERSION__
 
 const authUser = ref(null)
+
+const currentPageTitle = computed(() => {
+  const route = router.currentRoute.value
+  const titles = {
+    '/': '首页',
+    '/students': '学生管理',
+    '/teachers': '教师管理',
+    '/courses': '课程安排',
+    '/attendance': '点名',
+    '/calendar': '日历',
+    '/teacher-stats': '教师统计',
+    '/profile': '个人资料',
+    '/login': '登录'
+  }
+  return titles[route.path] || '教务系统'
+})
+
+const isLoginPage = computed(() => router.currentRoute.value.path === '/login')
 
 onMounted(async () => {
   isElectronEnv.value = checkIsElectron()
@@ -182,9 +314,11 @@ async function handleImport(event) {
 .app {
   min-height: 100vh;
   background: var(--color-bg-secondary);
+  padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
-.header {
+/* ===== 桌面端顶部导航 ===== */
+.desktop-nav {
   background: rgba(255, 255, 255, 0.8);
   backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--color-border);
@@ -201,7 +335,6 @@ async function handleImport(event) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
 }
 
 .logo {
@@ -247,22 +380,6 @@ async function handleImport(event) {
 .nav-item.active {
   color: var(--color-primary);
   background: rgba(0, 113, 227, 0.1);
-}
-
-.main {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 32px 24px;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 .header-actions {
@@ -314,6 +431,142 @@ async function handleImport(event) {
   gap: 6px;
 }
 
+/* ===== 移动端顶部栏（默认隐藏）===== */
+.mobile-header {
+  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.mobile-header-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 48px;
+}
+
+.mobile-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mobile-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mobile-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-decoration: none;
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-icon-btn:active {
+  background: var(--color-bg-secondary);
+}
+
+/* ===== 移动端底部 Tab 栏（默认隐藏）===== */
+.mobile-tab-bar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--color-border);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 0 8px;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: 10px;
+  font-weight: 500;
+  transition: color 0.2s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.tab-item:active {
+  color: var(--color-primary);
+}
+
+.tab-active {
+  color: var(--color-primary) !important;
+}
+
+/* ===== 移动端更多菜单 ===== */
+.mobile-more-overlay {
+  display: none;
+}
+
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  color: var(--color-text);
+  text-decoration: none;
+  font-size: 15px;
+  font-weight: 500;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.more-item:active {
+  background: var(--color-bg-secondary);
+}
+
+/* ===== 主内容区 ===== */
+.main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* ===== 弹窗 ===== */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -325,27 +578,30 @@ async function handleImport(event) {
   align-items: center;
   justify-content: center;
   z-index: 1000;
+  padding: 16px;
 }
 
 .modal {
   background: white;
   border-radius: var(--radius-lg);
-  padding: 32px;
+  padding: 24px;
   width: 100%;
   max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
 }
 
 .modal-title {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 600;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .store-info {
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);
   padding: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .store-label {
@@ -362,7 +618,7 @@ async function handleImport(event) {
 }
 
 .backup-section {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .backup-section h3 {
@@ -381,7 +637,7 @@ async function handleImport(event) {
 .backup-divider {
   height: 1px;
   background: var(--color-border);
-  margin: 24px 0;
+  margin: 20px 0;
 }
 
 .import-area {
@@ -405,7 +661,7 @@ async function handleImport(event) {
   display: flex;
   gap: 12px;
   justify-content: flex-end;
-  margin-top: 24px;
+  margin-top: 20px;
 }
 
 /* Electron 环境：为红绿灯按钮留出空间 */
@@ -413,87 +669,76 @@ async function handleImport(event) {
   padding-left: 78px;
 }
 
-/* 响应式布局 */
+/* ===== 桌面端：隐藏移动端元素 ===== */
 @media (max-width: 900px) {
   .header-content {
     padding: 0 16px;
   }
-
   .nav-item {
     padding: 6px 12px;
     font-size: 13px;
   }
-
   .logo-text {
     font-size: 16px;
   }
-
   .header-actions .btn-sm span {
     display: none;
   }
-
   .header-actions .btn-sm {
     padding: 8px;
   }
 }
 
+/* ===== 移动端：切换为底部 Tab 导航 ===== */
 @media (max-width: 768px) {
-  .header-content {
-    height: auto;
-    flex-wrap: wrap;
-    padding: 12px 16px;
-  }
-
-  .logo {
-    flex-shrink: 0;
-  }
-
-  .nav {
-    width: 100%;
-    order: 3;
-    margin-top: 12px;
-    overflow-x: auto;
-    padding-bottom: 4px;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .nav::-webkit-scrollbar {
+  .desktop-nav {
     display: none;
   }
 
-  .nav-item {
-    padding: 6px 12px;
-    font-size: 13px;
-    white-space: nowrap;
-    flex-shrink: 0;
+  .mobile-header {
+    display: block;
   }
 
-  .header-actions {
-    margin-left: auto;
+  .mobile-tab-bar {
+    display: flex;
   }
 
-  .btn-sm {
-    padding: 6px 10px;
+  .mobile-more-overlay {
+    display: block;
+    position: fixed;
+    bottom: 56px;
+    left: 8px;
+    right: 8px;
+    z-index: 250;
   }
 
-  .btn-sm svg {
-    width: 14px;
-    height: 14px;
+  .mobile-more-menu {
+    background: white;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    animation: slideUp 0.2s ease;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   .main {
-    padding: 24px 16px;
-  }
-}
-
-@media (max-width: 480px) {
-  .logo-text {
-    font-size: 15px;
+    padding: 16px 12px;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
   }
 
-  .logo svg {
-    width: 28px;
-    height: 28px;
+  .modal {
+    padding: 20px 16px;
+    border-radius: var(--radius-md);
   }
 }
 </style>
