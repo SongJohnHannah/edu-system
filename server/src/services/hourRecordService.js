@@ -1,12 +1,13 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
+import { formatDateTime } from '../utils/dateFormat.js'
 
 function formatRecord(row) {
   return {
     ...row,
     studentId: row.student_id,
     relatedId: row.related_id,
-    createdAt: row.created_at
+    createdAt: formatDateTime(row.created_at)
   }
 }
 

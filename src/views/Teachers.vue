@@ -20,20 +20,27 @@
     </div>
 
     <div class="teachers-grid" v-if="filteredTeachers.length > 0">
-      <div class="teacher-card" v-for="teacher in filteredTeachers" :key="teacher.id">
+      <div class="teacher-card" :class="{ 'card-deleted': teacher.status === 'deleted' }" v-for="teacher in filteredTeachers" :key="teacher.id">
         <div class="teacher-avatar">{{ teacher.name.charAt(0) }}</div>
         <div class="teacher-info">
-          <h3 class="teacher-name">{{ teacher.name }}</h3>
+          <h3 class="teacher-name">
+            {{ teacher.name }}
+            <span class="badge badge-danger" v-if="teacher.status === 'deleted'">已删除</span>
+          </h3>
           <p class="teacher-subject" v-if="teacher.subject">{{ teacher.subject }}</p>
           <p class="teacher-phone" v-if="teacher.phone">{{ teacher.phone }}</p>
         </div>
         <div class="teacher-meta">
           <span class="course-count">{{ getCourseCount(teacher.id) }} 门课程</span>
         </div>
-        <div class="teacher-actions">
+        <div class="teacher-actions" v-if="teacher.status !== 'deleted'">
           <button class="btn btn-text" @click="editTeacher(teacher)">编辑</button>
+          <button class="btn btn-text" v-if="isAdmin && useApi" @click="openHandoverModal(teacher)">交接课程</button>
           <button class="btn btn-text" v-if="isAdmin && teacher.userId" @click="openAccountModal(teacher)">账户</button>
           <button class="btn btn-text" style="color: var(--color-danger)" @click="removeTeacher(teacher.id)">删除</button>
+        </div>
+        <div class="teacher-actions" v-else>
+          <button class="btn btn-text" style="color: var(--color-success)" @click="restoreTeacher(teacher.id)" v-if="isAdmin">恢复</button>
         </div>
       </div>
     </div>
@@ -128,13 +135,56 @@
         </div>
       </div>
     </div>
+
+    <!-- 课程交接弹窗 -->
+    <div class="modal-overlay" v-if="showHandoverModal" @click.self="showHandoverModal = false">
+      <div class="modal">
+        <h2 class="modal-title">课程交接</h2>
+        <div class="handover-info">
+          <div class="handover-row">
+            <span class="handover-label">原教师：</span>
+            <span class="handover-value">{{ handoverTeacher?.name }}</span>
+          </div>
+        </div>
+        <div class="form-group" v-if="handoverCourses.length > 0">
+          <label>选择要交接的课程</label>
+          <div class="handover-course-list">
+            <label class="handover-course-item" v-for="course in handoverCourses" :key="course.id">
+              <input type="checkbox" :value="course.id" v-model="handoverSelectedCourses" />
+              <span>{{ course.name }}（{{ ['日','一','二','三','四','五','六'][course.weekday || 0] }} {{ course.startTime }}-{{ course.endTime }}）</span>
+            </label>
+          </div>
+        </div>
+        <div class="empty-state" v-else style="padding: 16px; color: var(--color-text-secondary);">
+          该教师暂无课程可交接
+        </div>
+        <div class="form-group">
+          <label>交接给</label>
+          <select class="input" v-model="handoverTargetTeacherId">
+            <option value="">请选择教师</option>
+            <option v-for="t in teachers.filter(t => t.id !== handoverTeacher?.id)" :key="t.id" :value="t.id">{{ t.name }}</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>交接原因（选填）</label>
+          <textarea class="input" v-model="handoverReason" rows="2" placeholder="如：教师离职、课程调整等"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" @click="showHandoverModal = false">取消</button>
+          <button class="btn btn-primary" @click="confirmHandover" :disabled="!handoverTargetTeacherId || handoverSelectedCourses.length === 0 || handoverSubmitting">
+            {{ handoverSubmitting ? '交接中...' : '确认交接' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { getTeachers, addTeacher, updateTeacher, deleteTeacher } from '../utils/storage'
+import { getTeachers, addTeacher, updateTeacher, deleteTeacher, updateTeacherStatus } from '../utils/storage'
 import { getCourses } from '../utils/storage'
+import { performHandover } from '../utils/storage'
 import { api } from '../utils/api.js'
 import { useToast } from '../composables/useToast'
 
@@ -215,6 +265,8 @@ async function saveTeacher() {
       }
     }
     closeModal()
+  } catch (err) {
+    toast.error(err.message || '保存失败')
   } finally {
     submitting.value = false
   }
@@ -232,10 +284,21 @@ async function confirmDeleteTeacher() {
   if (submitting.value) return
   submitting.value = true
   try {
-    teachers.value = await deleteTeacher(deleteTargetId.value)
+    teachers.value = await updateTeacherStatus(deleteTargetId.value, 'deleted')
     showConfirmModal.value = false
+  } catch (err) {
+    toast.error(err.message || '删除失败')
   } finally {
     submitting.value = false
+  }
+}
+
+async function restoreTeacher(id) {
+  try {
+    teachers.value = await updateTeacherStatus(id, 'active')
+    toast.success('教师已恢复')
+  } catch (err) {
+    toast.error(err.message || '恢复失败')
   }
 }
 
@@ -264,6 +327,42 @@ async function saveAccount() {
     toast.error(err.message || '保存失败')
   } finally {
     submitting.value = false
+  }
+}
+
+// 课程交接
+const showHandoverModal = ref(false)
+const handoverTeacher = ref(null)
+const handoverCourses = ref([])
+const handoverSelectedCourses = ref([])
+const handoverTargetTeacherId = ref('')
+const handoverReason = ref('')
+const handoverSubmitting = ref(false)
+
+function openHandoverModal(teacher) {
+  handoverTeacher.value = teacher
+  handoverCourses.value = courses.value.filter(c => c.teacherId === teacher.id)
+  handoverSelectedCourses.value = handoverCourses.value.map(c => c.id)
+  handoverTargetTeacherId.value = ''
+  handoverReason.value = ''
+  showHandoverModal.value = true
+}
+
+async function confirmHandover() {
+  if (handoverSubmitting.value) return
+  handoverSubmitting.value = true
+  try {
+    for (const courseId of handoverSelectedCourses.value) {
+      await performHandover(courseId, handoverTargetTeacherId.value, handoverReason.value)
+    }
+    toast.success(`已成功交接 ${handoverSelectedCourses.value.length} 门课程`)
+    showHandoverModal.value = false
+    teachers.value = await getTeachers() || []
+    courses.value = await getCourses() || []
+  } catch (err) {
+    toast.error(err.message || '交接失败')
+  } finally {
+    handoverSubmitting.value = false
   }
 }
 
@@ -368,6 +467,7 @@ function closeModal() {
   margin-top: 12px;
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .empty-state {
@@ -503,5 +603,85 @@ function closeModal() {
   .teachers-grid {
     grid-template-columns: 1fr;
   }
+  .modal {
+    margin: 16px;
+    padding: 24px;
+  }
+  .modal-actions {
+    flex-direction: column;
+  }
+  .modal-actions .btn {
+    width: 100%;
+  }
+}
+
+.handover-info {
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+
+.handover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.handover-label {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.handover-value {
+  font-weight: 600;
+}
+
+.handover-course-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.handover-course-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.handover-course-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.card-deleted {
+  opacity: 0.5;
+}
+
+.card-deleted .teacher-name {
+  text-decoration: line-through;
+  color: var(--color-text-secondary);
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.badge-danger {
+  background: #fee2e2;
+  color: #dc2626;
 }
 </style>

@@ -24,7 +24,7 @@
       />
     </div>
 
-    <div class="table-container">
+    <div class="table-container desktop-only">
       <table class="table" v-if="filteredStudents.length > 0">
         <thead>
           <tr>
@@ -79,6 +79,39 @@
           <button class="btn btn-secondary" @click="showBatchModal = true">批量添加</button>
           <button class="btn btn-primary" @click="openAddModal">添加第一个学生</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 移动端卡片列表 -->
+    <div class="mobile-card-list mobile-only" v-if="filteredStudents.length > 0">
+      <div class="mobile-card" v-for="student in filteredStudents" :key="student.id" :class="{ 'card-deleted': student.status === 'deleted' || student.status === 'quit' }">
+        <div class="mobile-card-sticky">
+          <div class="mobile-card-main">
+            <strong class="mobile-name">{{ student.name }}</strong>
+            <span class="mobile-remaining" :class="getHoursStatusClass(student)">{{ student.totalHours - (student.usedHours || 0) }} 课时</span>
+          </div>
+          <span class="badge mobile-status-badge" :class="getStudentStatusClass(student)" @click="openStatusMenu(student)">
+            {{ getStudentStatusText(student) }}
+          </span>
+        </div>
+        <div class="mobile-card-actions">
+          <template v-if="student.status === 'active'">
+            <button class="btn btn-text" @click="openAddHoursModal(student)">加课</button>
+            <button class="btn btn-text" @click="goToHistory(student.id)">历史</button>
+            <button class="btn btn-text" @click="editStudent(student)">编辑</button>
+            <button class="btn btn-text btn-danger-text" @click="removeStudent(student)">删除</button>
+          </template>
+          <template v-else>
+            <button class="btn btn-text" @click="goToHistory(student.id)">历史</button>
+          </template>
+        </div>
+      </div>
+    </div>
+    <div class="empty-state mobile-only" v-if="filteredStudents.length === 0">
+      <p>暂无学生数据</p>
+      <div class="empty-actions">
+        <button class="btn btn-secondary" @click="showBatchModal = true">批量添加</button>
+        <button class="btn btn-primary" @click="openAddModal">添加第一个学生</button>
       </div>
     </div>
 
@@ -153,6 +186,21 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" @click="closeBatchModal">取消</button>
           <button type="button" class="btn btn-primary" @click="saveBatchStudents" :disabled="!hasValidBatchData || submitting">{{ submitting ? '提交中...' : '确认添加' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量添加结果弹窗 -->
+    <div class="modal-overlay" v-if="showBatchResultModal">
+      <div class="modal modal-sm">
+        <h2 class="modal-title">批量添加结果</h2>
+        <p style="font-size: 14px; margin-bottom: 12px;">成功添加 <strong>{{ batchResult.added }}</strong> 名学生</p>
+        <div v-if="batchResult.skipped.length > 0" class="confirm-warning" style="margin-bottom: 16px;">
+          <p>以下姓名已存在，已自动跳过：</p>
+          <p><strong>{{ batchResult.skipped.join('、') }}</strong></p>
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-primary" @click="showBatchResultModal = false">确定</button>
         </div>
       </div>
     </div>
@@ -237,6 +285,8 @@ const students = ref([])
 const searchText = ref('')
 const showModal = ref(false)
 const showBatchModal = ref(false)
+const showBatchResultModal = ref(false)
+const batchResult = ref({ added: 0, skipped: [] })
 const showHoursModal = ref(false)
 const showStatusModal = ref(false)
 const editingStudent = ref(null)
@@ -358,6 +408,8 @@ async function saveStudent() {
       students.value = await addStudent(form.value)
     }
     closeModal()
+  } catch (err) {
+    toast.error(err.message || '保存失败')
   } finally {
     submitting.value = false
   }
@@ -440,8 +492,15 @@ async function saveBatchStudents() {
 
     const result = await addStudentsBatch(validRows, batchDefaultHours.value)
     students.value = result.students
-    toast.success(`成功添加 ${result.addedCount} 名学生`)
     closeBatchModal()
+    if (result.skipped && result.skipped.length > 0) {
+      batchResult.value = { added: result.addedCount, skipped: result.skipped }
+      showBatchResultModal.value = true
+    } else {
+      toast.success(`成功添加 ${result.addedCount} 名学生`)
+    }
+  } catch (err) {
+    toast.error(err.message || '批量添加失败')
   } finally {
     submitting.value = false
   }
@@ -467,6 +526,8 @@ async function saveAddHours() {
     students.value = await addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
     toast.success(`已为 ${hoursStudent.value.name} 添加 ${addHoursForm.value.hours} 课时`)
     closeHoursModal()
+  } catch (err) {
+    toast.error(err.message || '添加课时失败')
   } finally {
     submitting.value = false
   }
@@ -491,6 +552,8 @@ async function saveStatus() {
   try {
     students.value = await updateStudentStatus(statusStudent.value.id, statusForm.value.status)
     closeStatusModal()
+  } catch (err) {
+    toast.error(err.message || '状态更新失败')
   } finally {
     submitting.value = false
   }
@@ -583,7 +646,8 @@ function goToHistory(studentId) {
 .status-badges {
   display: flex;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .badge {
@@ -612,7 +676,8 @@ function goToHistory(studentId) {
 .action-buttons {
   display: flex;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .action-buttons .btn {
@@ -830,6 +895,77 @@ function goToHistory(studentId) {
   color: #8e8e93;
 }
 
+/* ===== 移动端卡片（默认隐藏）===== */
+.mobile-only { display: none; }
+
+.mobile-card-list {
+  background: white;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-card {
+  display: flex;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--color-border);
+}
+.mobile-card:last-child { border-bottom: none; }
+.mobile-card::-webkit-scrollbar { display: none; }
+
+.mobile-card-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: white;
+  padding: 12px 16px;
+  flex-shrink: 0;
+  min-width: 55%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mobile-card-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.mobile-name {
+  font-size: 15px;
+}
+
+.mobile-remaining {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.mobile-status-badge {
+  flex-shrink: 0;
+}
+
+.mobile-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  flex-shrink: 0;
+}
+
+.card-deleted .mobile-name {
+  text-decoration: line-through;
+  color: #8e8e93;
+}
+
+.btn-danger-text {
+  color: var(--color-danger) !important;
+}
+
 @media (max-width: 768px) {
   .page-header {
     flex-direction: column;
@@ -843,6 +979,24 @@ function goToHistory(studentId) {
 
   .header-actions .btn {
     flex: 1;
+  }
+
+  .desktop-only { display: none; }
+  .mobile-only { display: block; }
+
+  .action-buttons {
+    flex-wrap: nowrap;
+  }
+
+  .modal {
+    margin: 16px;
+    padding: 24px;
+  }
+  .modal-actions {
+    flex-direction: column;
+  }
+  .modal-actions .btn {
+    width: 100%;
   }
 }
 </style>

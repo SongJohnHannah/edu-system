@@ -26,3 +26,7 @@ npm-debug.log*
 # Server
 server/node_modules/
 server/.env
+
+# Test
+test-results/
+playwright-report/

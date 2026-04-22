@@ -27,18 +27,18 @@ export async function getTeacherStats(startDate, endDate, teacherScope) {
     GROUP BY c.teacher_id
   `, [...teacherIds, ...teacherIds])
 
-  // Single query to get attendance stats per teacher
+  // Attendance stats by actual recorder (recorded_by), not current course owner
   const [attStats] = await pool.execute(`
-    SELECT c.teacher_id,
+    SELECT a.recorded_by AS teacher_id,
            COUNT(a.id) AS attendance_count,
            COALESCE(SUM(
              (a.hours_deducted || 1) * JSON_LENGTH(a.student_ids)
            ), 0) AS consumed_hours
-    FROM courses c
-    LEFT JOIN attendance a ON a.course_id = c.id AND a.date BETWEEN ? AND ?
-    WHERE c.teacher_id IN (${teacherIds.map(() => '?').join(',')})
-    GROUP BY c.teacher_id
-  `, [startDate, endDate, ...teacherIds])
+    FROM attendance a
+    WHERE a.recorded_by IN (${teacherIds.map(() => '?').join(',')})
+      AND a.date BETWEEN ? AND ?
+    GROUP BY a.recorded_by
+  `, [...teacherIds, startDate, endDate])
 
   const courseMap = new Map(courseStats.map(r => [r.teacher_id, r]))
   const attMap = new Map(attStats.map(r => [r.teacher_id, r]))
@@ -73,13 +73,11 @@ export async function getWeekdayDistribution(teacherScope) {
 export async function getOverallStats(startDate, endDate, teacherScope) {
   let teacherWhere = ''
   let courseFilter = ''
-  let params = [startDate, endDate]
   let courseParams = []
 
   if (teacherScope) {
     teacherWhere = ' WHERE id = ?'
     courseFilter = ' AND c.teacher_id = ?'
-    params.push(teacherScope)
     courseParams = [teacherScope]
   }
 
@@ -88,22 +86,28 @@ export async function getOverallStats(startDate, endDate, teacherScope) {
     teacherScope ? [teacherScope] : []
   )
 
+  // Course count (by current ownership)
+  const [[{ totalCourses }]] = await pool.execute(
+    `SELECT COUNT(DISTINCT id) AS totalCourses FROM courses WHERE 1=1 ${courseFilter ? ' AND teacher_id = ?' : ''}`,
+    courseParams
+  )
+
+  // Attendance stats (by recorded_by, the actual teacher who took attendance)
+  const attFilter = teacherScope ? ' AND a.recorded_by = ?' : ''
   const [stats] = await pool.execute(`
-    SELECT COUNT(DISTINCT c.id) AS totalCourses,
-           COUNT(a.id) AS totalAttendance,
+    SELECT COUNT(a.id) AS totalAttendance,
            COALESCE(SUM(
              (a.hours_deducted || 1) * JSON_LENGTH(a.student_ids)
            ), 0) AS totalConsumedHours,
-           COUNT(DISTINCT CASE WHEN a.id IS NOT NULL THEN c.teacher_id END) AS activeTeachers
-    FROM courses c
-    LEFT JOIN attendance a ON a.course_id = c.id AND a.date BETWEEN ? AND ?
-    WHERE 1=1 ${courseFilter}
-  `, params)
+           COUNT(DISTINCT a.recorded_by) AS activeTeachers
+    FROM attendance a
+    WHERE a.date BETWEEN ? AND ? ${attFilter}
+  `, teacherScope ? [startDate, endDate, teacherScope] : [startDate, endDate])
 
   return {
     totalTeachers,
     activeTeachers: stats[0].activeTeachers || 0,
-    totalCourses: stats[0].totalCourses || 0,
+    totalCourses: totalCourses || 0,
     totalAttendance: stats[0].totalAttendance || 0,
     totalConsumedHours: stats[0].totalConsumedHours || 0
   }

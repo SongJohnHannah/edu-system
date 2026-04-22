@@ -34,7 +34,7 @@ export async function saveStudents(students) {
 export async function addStudentsBatch(studentList, defaultHours = 0) {
   const result = await api.post('/students/batch', { students: studentList, defaultHours })
   const allStudents = await api.get('/students')
-  return { students: allStudents, addedCount: result.addedCount }
+  return { students: allStudents, addedCount: result.addedCount, skipped: result.skipped || [] }
 }
 
 export async function updateStudentStatus(studentId, status) {
@@ -70,6 +70,11 @@ export async function updateTeacher(id, updates) {
 
 export async function deleteTeacher(id) {
   await api.del(`/teachers/${id}`)
+  return api.get('/teachers')
+}
+
+export async function updateTeacherStatus(id, status) {
+  await api.put(`/teachers/${id}/status`, { status })
   return api.get('/teachers')
 }
 
@@ -203,13 +208,26 @@ export async function getClassName(classId) {
 // ========== 数据备份与恢复 ==========
 
 export async function exportData() {
-  const data = await api.get('/backup/export')
-  return JSON.stringify(data, null, 2)
+  const resp = await fetch('/edusystem/api/backup/export', {
+    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+  })
+  return await resp.text()
 }
 
-export async function importData(jsonString) {
+export async function importData(fileContent) {
   try {
-    const importObj = JSON.parse(jsonString)
+    if (fileContent.trim().startsWith('--')) {
+      const resp = await fetch('/edusystem/api/backup/import-sql', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        },
+        body: fileContent
+      })
+      return await resp.json()
+    }
+    const importObj = JSON.parse(fileContent)
     if (!importObj.data) {
       return { success: false, message: '无效的备份文件格式' }
     }
@@ -222,13 +240,13 @@ export async function importData(jsonString) {
 
 export async function downloadBackup() {
   try {
-    const jsonStr = await exportData()
-    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const sqlContent = await exportData()
+    const blob = new Blob([sqlContent], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     const timestamp = new Date().toISOString().slice(0, 10)
     a.href = url
-    a.download = `嘉言思听教务系统备份_${timestamp}.json`
+    a.download = `嘉言思听教务系统备份_${timestamp}.sql`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -250,9 +268,13 @@ export function checkIsElectron() {
 
 // ========== 统计相关 ==========
 
+function toLocalDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export async function getTeacherStats(startDate, endDate) {
-  const start = startDate.toISOString().split('T')[0]
-  const end = endDate.toISOString().split('T')[0]
+  const start = toLocalDate(startDate)
+  const end = toLocalDate(endDate)
   return api.get(`/stats/teachers?start=${start}&end=${end}`)
 }
 
@@ -261,8 +283,8 @@ export async function getWeekdayDistribution() {
 }
 
 export async function getOverallStats(startDate, endDate) {
-  const start = startDate.toISOString().split('T')[0]
-  const end = endDate.toISOString().split('T')[0]
+  const start = toLocalDate(startDate)
+  const end = toLocalDate(endDate)
   return api.get(`/stats/overall?start=${start}&end=${end}`)
 }
 
@@ -290,6 +312,17 @@ export function getDateRange(preset) {
     default:
       return { start: startOfDay, end: startOfDay }
   }
+}
+
+// ========== 交接管理 ==========
+
+export async function performHandover(courseId, newTeacherId, reason) {
+  return api.post('/handovers', { courseId, newTeacherId, reason })
+}
+
+export async function getHandoverHistory(courseId) {
+  const params = courseId ? `?courseId=${courseId}` : ''
+  return api.get(`/handovers${params}`)
 }
 
 // ========== 初始化 ==========

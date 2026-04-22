@@ -121,7 +121,7 @@
           <div class="history-item" v-for="record in filteredRecords" :key="record.id">
             <div class="history-main">
               <div class="history-row">
-                <span class="history-date">{{ record.date }}</span>
+                <span class="history-date">{{ record.date }} {{ record.createdAt?.split(' ')[1] }}</span>
                 <span class="history-course">{{ getCourseName(record.courseId) }}</span>
                 <span class="history-teacher">{{ getTeacherNameByCourse(record.courseId) }}</span>
               </div>
@@ -130,7 +130,7 @@
                 <span class="history-hours">扣除 {{ record.hoursDeducted }} 课时/人</span>
               </div>
             </div>
-            <button class="btn btn-text delete-btn" @click="openDeleteModal(record)">删除</button>
+            <button class="btn btn-text delete-btn" @click="openDeleteModal(record)" v-if="canDeleteRecord(record)">删除</button>
           </div>
         </div>
         <div class="empty-history" v-else>
@@ -143,11 +143,26 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getCourses, getStudents, getTeachers, getAttendance, getAttendancePage, addAttendance, deductHours, removeStudentsFromRecord } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
+const useApi = import.meta.env.VITE_USE_API === 'true'
+const isAdmin = computed(() => {
+  if (!useApi) return true
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null')
+    return user?.role === 'admin'
+  } catch { return false }
+})
+const currentUserTeacherId = computed(() => {
+  if (!useApi) return null
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null')
+    return user?.teacherId || null
+  } catch { return null }
+})
 const courses = ref([])
 const students = ref([])
 const teachers = ref([])
@@ -155,7 +170,8 @@ const attendanceRecords = ref([])
 const hasMoreRecords = ref(false)
 const selectedCourseId = ref('')
 const filterCourseId = ref('')
-const filterMonth = ref(new Date().toISOString().slice(0, 7))
+const nowDate = new Date()
+const filterMonth = ref(`${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}`)
 const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
@@ -169,7 +185,8 @@ const deleteCheckedStudents = ref([])
 // 检查今天是否已经点过名
 function hasTodayAttendance() {
   if (!selectedCourse.value) return false
-  const today = new Date().toISOString().split('T')[0]
+  const d = new Date()
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
   return attendanceRecords.value.some(r =>
     r.courseId === selectedCourse.value.id && r.date === today
   )
@@ -183,7 +200,7 @@ function handleConfirmClick() {
 
 const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
 
-onMounted(async () => {
+async function loadData() {
   const [c, s, t, page] = await Promise.all([
     getCourses(), getStudents(), getTeachers(), getAttendancePage({ limit: 50 })
   ])
@@ -193,7 +210,23 @@ onMounted(async () => {
   const pageData = page || {}
   attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
   hasMoreRecords.value = pageData.hasMore || false
+}
+
+onMounted(async () => {
+  await loadData()
+  // 页面可见性变化时刷新数据（处理移交后数据过期问题）
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    loadData()
+  }
+}
 
 async function loadMoreRecords() {
   const currentCount = attendanceRecords.value.length
@@ -277,12 +310,26 @@ async function submitAttendance() {
 
   submitting.value = true
   try {
-    const hoursPerStudent = selectedCourse.value.hoursPerClass || 1
+    // 提交前刷新课程数据，确认课程仍属于当前老师
+    const freshCourses = await getCourses()
+    const freshCourse = (freshCourses || []).find(c => c.id === selectedCourse.value.id)
+    if (!freshCourse) {
+      toast.error('该课程已移交，无法点名')
+      showConfirmModal.value = false
+      courses.value = freshCourses || []
+      selectedCourseId.value = ''
+      courseStudents.value = []
+      checkedStudents.value = []
+      return
+    }
+
+    const hoursPerStudent = freshCourse.hoursPerClass || 1
 
     // 记录点名（后端会自动扣课时）
+    const now = new Date()
     await addAttendance({
-      courseId: selectedCourse.value.id,
-      date: new Date().toISOString().split('T')[0],
+      courseId: freshCourse.id,
+      date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
       studentIds: [...checkedStudents.value],
       hoursDeducted: hoursPerStudent
     })
@@ -299,6 +346,8 @@ async function submitAttendance() {
     checkedStudents.value = []
     toast.success('点名成功！已扣除对应课时。')
     loadCourseStudents()
+  } catch (err) {
+    toast.error(err.message || '点名失败')
   } finally {
     submitting.value = false
   }
@@ -311,6 +360,12 @@ const deleteTargetStudents = computed(() => {
     .map(id => students.value.find(s => s.id === id))
     .filter(Boolean)
 })
+
+function canDeleteRecord(record) {
+  if (isAdmin.value) return true
+  if (!record.recordedBy) return true
+  return record.recordedBy === currentUserTeacherId.value
+}
 
 function openDeleteModal(record) {
   deleteTargetRecord.value = record
@@ -336,6 +391,8 @@ async function confirmDeleteStudents() {
     } else {
       toast.success(`已删除 ${deleteCheckedStudents.value.length} 名学生并还原课时。`)
     }
+  } catch (err) {
+    toast.error(err.message || '删除失败')
   } finally {
     submitting.value = false
   }
@@ -678,6 +735,13 @@ async function confirmDeleteStudents() {
   margin-bottom: 24px;
 }
 
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+
 .confirm-info {
   margin-bottom: 24px;
 }
@@ -696,5 +760,47 @@ async function confirmDeleteStudents() {
   color: #856404;
   font-size: 14px;
   font-weight: 500;
+}
+
+@media (max-width: 768px) {
+  .modal {
+    margin: 16px;
+    padding: 24px;
+  }
+  .modal-actions {
+    flex-direction: column;
+  }
+  .modal-actions .btn {
+    width: 100%;
+  }
+  .history-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .filter-group {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .form-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .student-info {
+    flex-direction: column;
+    gap: 2px;
+  }
+  .deduct-info {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .history-item {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+  .history-row {
+    flex-direction: column;
+    gap: 4px;
+  }
 }
 </style>

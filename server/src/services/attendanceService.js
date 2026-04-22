@@ -1,13 +1,17 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
+import { formatDate, formatDateTime } from '../utils/dateFormat.js'
 
 function formatAttendance(row) {
   return {
     ...row,
+    date: formatDate(row.date),
     courseId: row.course_id,
     studentIds: typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : (row.student_ids || []),
     hoursDeducted: row.hours_deducted,
-    createdAt: row.created_at
+    recordedBy: row.recorded_by,
+    isTest: !!row.is_test,
+    createdAt: formatDateTime(row.created_at)
   }
 }
 
@@ -25,10 +29,9 @@ export async function getAll(teacherScope, { limit = 50, offset = 0 } = {}) {
     return { data: data.map(formatAttendance), hasMore }
   }
   const [rows] = await pool.execute(`
-    SELECT a.* FROM attendance a
-    JOIN courses c ON a.course_id = c.id
-    WHERE c.teacher_id = ?
-    ORDER BY a.created_at DESC
+    SELECT * FROM attendance
+    WHERE recorded_by = ?
+    ORDER BY created_at DESC
     LIMIT ${fetchCount} OFFSET ${offsetNum}
   `, [teacherScope])
   const hasMore = rows.length > limitNum
@@ -49,9 +52,10 @@ export async function create(data, teacherScope, user) {
     }
 
     const id = generateId()
+    const recordedBy = teacherScope || null
     await conn.execute(
-      'INSERT INTO attendance (id, course_id, date, student_ids, hours_deducted) VALUES (?, ?, ?, ?, ?)',
-      [id, data.courseId, data.date, JSON.stringify(data.studentIds), data.hoursDeducted || 1]
+      'INSERT INTO attendance (id, course_id, date, student_ids, hours_deducted, recorded_by, is_test) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, data.courseId, data.date, JSON.stringify(data.studentIds), data.hoursDeducted || 1, recordedBy, data.isTest ? 1 : 0]
     )
 
     // Batch update students used_hours
@@ -62,13 +66,13 @@ export async function create(data, teacherScope, user) {
       [hours, ...data.studentIds]
     )
 
-    // Batch insert hour_records
-    const hrValues = data.studentIds.map(sid =>
-      `('${generateId()}', '${sid}', 'deduct', ${hours}, '点名扣除', '${id}', '${user.username}')`
-    ).join(',')
-    await conn.execute(
-      `INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES ${hrValues}`
-    )
+    // Batch insert hour_records (parameterized)
+    for (const sid of data.studentIds) {
+      await conn.execute(
+        'INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [generateId(), sid, 'deduct', hours, '点名扣除', id, user.username]
+      )
+    }
 
     await conn.commit()
     const [rows] = await pool.execute('SELECT * FROM attendance WHERE id = ?', [id])
@@ -93,9 +97,8 @@ export async function remove(attendanceId, teacherScope) {
     const studentIds = typeof record.student_ids === 'string' ? JSON.parse(record.student_ids) : (record.student_ids || [])
 
     if (teacherScope) {
-      const [courses] = await conn.execute('SELECT teacher_id FROM courses WHERE id = ?', [record.course_id])
-      if (!courses[0] || courses[0].teacher_id !== teacherScope) {
-        throw new Error('无权删除该点名记录')
+      if (record.recorded_by && record.recorded_by !== teacherScope) {
+        throw new Error('只能删除自己创建的点名记录')
       }
     }
 
@@ -106,13 +109,13 @@ export async function remove(attendanceId, teacherScope) {
       [record.hours_deducted, ...studentIds]
     )
 
-    // Batch insert restore records
-    const hrValues = studentIds.map(sid =>
-      `('${generateId()}', '${sid}', 'restore', ${record.hours_deducted}, '删除点名记录还原', '${attendanceId}', 'restore')`
-    ).join(',')
-    await conn.execute(
-      `INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES ${hrValues}`
-    )
+    // Batch insert restore records (parameterized)
+    for (const sid of studentIds) {
+      await conn.execute(
+        'INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [generateId(), sid, 'restore', record.hours_deducted, '删除点名记录还原', attendanceId, 'restore']
+      )
+    }
 
     await conn.execute('DELETE FROM attendance WHERE id = ?', [attendanceId])
     await conn.commit()
@@ -136,9 +139,8 @@ export async function removeStudents(attendanceId, studentIdsToRemove, teacherSc
     const currentStudentIds = typeof record.student_ids === 'string' ? JSON.parse(record.student_ids) : (record.student_ids || [])
 
     if (teacherScope) {
-      const [courses] = await conn.execute('SELECT teacher_id FROM courses WHERE id = ?', [record.course_id])
-      if (!courses[0] || courses[0].teacher_id !== teacherScope) {
-        throw new Error('无权操作该点名记录')
+      if (record.recorded_by && record.recorded_by !== teacherScope) {
+        throw new Error('只能删除自己创建的点名记录')
       }
     }
 
@@ -152,13 +154,13 @@ export async function removeStudents(attendanceId, studentIdsToRemove, teacherSc
       [record.hours_deducted, ...studentIdsToRemove]
     )
 
-    // Batch insert restore records
-    const hrValues = studentIdsToRemove.map(sid =>
-      `('${generateId()}', '${sid}', 'restore', ${record.hours_deducted}, '删除点名记录还原', '${attendanceId}', 'restore')`
-    ).join(',')
-    await conn.execute(
-      `INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES ${hrValues}`
-    )
+    // Batch insert restore records (parameterized)
+    for (const sid of studentIdsToRemove) {
+      await conn.execute(
+        'INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [generateId(), sid, 'restore', record.hours_deducted, '删除点名记录还原', attendanceId, 'restore']
+      )
+    }
 
     if (remainingIds.length === 0) {
       await conn.execute('DELETE FROM attendance WHERE id = ?', [attendanceId])

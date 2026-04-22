@@ -52,6 +52,12 @@ const routes = [
     path: '/profile',
     name: 'Profile',
     component: () => import('../views/Profile.vue')
+  },
+  {
+    path: '/handovers',
+    name: 'HandoverHistory',
+    component: () => import('../views/HandoverHistory.vue'),
+    meta: { adminOnly: true }
   }
 ]
 

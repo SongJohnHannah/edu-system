@@ -1,5 +1,6 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
+import { formatDateTime } from '../utils/dateFormat.js'
 
 function formatStudent(row) {
   return {
@@ -9,8 +10,9 @@ function formatStudent(row) {
     classId: row.class_id,
     createdBy: row.created_by,
     creatorId: row.creator_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
+    isTest: !!row.is_test,
+    createdAt: formatDateTime(row.created_at),
+    updatedAt: formatDateTime(row.updated_at)
   }
 }
 
@@ -74,12 +76,20 @@ export async function verifyAccess(id, teacherScope) {
 }
 
 export async function create(data) {
+  const [dup] = await pool.execute('SELECT id FROM students WHERE name = ?', [data.name])
+  if (dup.length > 0) throw new Error('学生姓名已存在')
+
+  if (data.phone) {
+    const [phoneDup] = await pool.execute('SELECT id FROM students WHERE phone = ? AND phone != ""', [data.phone])
+    if (phoneDup.length > 0) throw new Error('该手机号已被其他学生使用')
+  }
+
   const id = generateId()
   await pool.execute(
-    `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id)
-     VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?)`,
+    `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
+     VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
     [id, data.name, data.phone || '', data.age || null, data.remark || '', data.totalHours || 0, data.classId || '',
-     data.createdBy || 'admin', data.creatorId || null]
+     data.createdBy || 'admin', data.creatorId || null, data.isTest ? 1 : 0]
   )
   const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
   return formatStudent(rows[0])
@@ -88,6 +98,16 @@ export async function create(data) {
 export async function update(id, data) {
   const [existing] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
   if (existing.length === 0) throw new Error('学生不存在')
+
+  if (data.name) {
+    const [dup] = await pool.execute('SELECT id FROM students WHERE name = ? AND id != ?', [data.name, id])
+    if (dup.length > 0) throw new Error('学生姓名已存在')
+  }
+
+  if (data.phone) {
+    const [phoneDup] = await pool.execute('SELECT id FROM students WHERE phone = ? AND id != ? AND phone != ""', [data.phone, id])
+    if (phoneDup.length > 0) throw new Error('该手机号已被其他学生使用')
+  }
 
   const s = existing[0]
   await pool.execute(
@@ -141,19 +161,33 @@ export async function addHours(id, hours, remark, operator) {
 
 export async function addBatch(studentList, defaultHours, createdBy = 'admin', creatorId = null) {
   let addedCount = 0
+  const skipped = []
   for (const student of studentList) {
     if (student.name && student.name.trim()) {
+      const name = student.name.trim()
+      const [dup] = await pool.execute('SELECT id FROM students WHERE name = ?', [name])
+      if (dup.length > 0) {
+        skipped.push(name)
+        continue
+      }
+      if (student.phone) {
+        const [phoneDup] = await pool.execute('SELECT id FROM students WHERE phone = ? AND phone != ""', [student.phone])
+        if (phoneDup.length > 0) {
+          skipped.push(name)
+          continue
+        }
+      }
       const id = generateId()
       await pool.execute(
-        `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?)`,
-        [id, student.name.trim(), '', student.age || null, '', student.totalHours || defaultHours || 0, student.classId || '',
-         createdBy, creatorId]
+        `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
+        [id, name, '', student.age || null, '', student.totalHours || defaultHours || 0, student.classId || '',
+         createdBy, creatorId, student.isTest ? 1 : 0]
       )
       addedCount++
     }
   }
-  return { addedCount }
+  return { addedCount, skipped }
 }
 
 // 验证教师能否将这些学生加入课程（管理员创建的学生若已被其他老师选入则不可再选）

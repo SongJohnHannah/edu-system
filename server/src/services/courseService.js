@@ -1,5 +1,6 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
+import { formatDateTime } from '../utils/dateFormat.js'
 
 function formatCourse(row) {
   return {
@@ -9,8 +10,9 @@ function formatCourse(row) {
     endTime: row.end_time,
     hoursPerClass: row.hours_per_class,
     studentIds: typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : (row.student_ids || []),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at
+    isTest: !!row.is_test,
+    createdAt: formatDateTime(row.created_at),
+    updatedAt: formatDateTime(row.updated_at)
   }
 }
 
@@ -42,10 +44,10 @@ export async function verifyAccess(id, teacherScope) {
 export async function create(data) {
   const id = generateId()
   await pool.execute(
-    `INSERT INTO courses (id, name, teacher_id, weekday, start_time, end_time, classroom, hours_per_class, student_ids)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO courses (id, name, teacher_id, weekday, start_time, end_time, classroom, hours_per_class, student_ids, is_test)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [id, data.name, data.teacherId, data.weekday, data.startTime, data.endTime,
-     data.classroom || '', data.hoursPerClass || 1, JSON.stringify(data.studentIds || [])]
+     data.classroom || '', data.hoursPerClass || 1, JSON.stringify(data.studentIds || []), data.isTest ? 1 : 0]
   )
   const [rows] = await pool.execute('SELECT * FROM courses WHERE id = ?', [id])
   return formatCourse(rows[0])
@@ -78,5 +80,6 @@ export async function update(id, data) {
 }
 
 export async function remove(id) {
+  await pool.execute('DELETE FROM attendance WHERE course_id = ?', [id])
   await pool.execute('DELETE FROM courses WHERE id = ?', [id])
 }

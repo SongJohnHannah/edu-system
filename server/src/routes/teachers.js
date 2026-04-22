@@ -27,8 +27,15 @@ router.put('/:id', requireAdmin, async (req, res, next) => {
 
 router.delete('/:id', requireAdmin, async (req, res, next) => {
   try {
-    await teacherService.remove(req.params.id)
-    res.json({ success: true })
+    const result = await teacherService.updateStatus(req.params.id, 'deleted')
+    res.json(result?.[0] || { success: true })
+  } catch (err) { next(err) }
+})
+
+router.put('/:id/status', requireAdmin, async (req, res, next) => {
+  try {
+    const result = await teacherService.updateStatus(req.params.id, req.body.status)
+    res.json(result?.[0] || { success: true })
   } catch (err) { next(err) }
 })
 

@@ -102,6 +102,7 @@ async function loadProfile() {
 }
 
 async function handleUpdateName() {
+  if (saving.value) return
   saving.value = true
   try {
     const updated = await api.put('/auth/profile', { displayName: nameForm.value.displayName })
@@ -116,6 +117,7 @@ async function handleUpdateName() {
 }
 
 async function handleChangePassword() {
+  if (saving.value) return
   passwordError.value = ''
   if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
     passwordError.value = '两次输入的新密码不一致'

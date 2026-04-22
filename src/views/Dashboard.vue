@@ -172,7 +172,7 @@ const attendance = ref([])
 
 // 获取今日日期信息
 const today = new Date()
-const todayStr = today.toISOString().split('T')[0]
+const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 const todayWeekday = today.getDay() || 7  // 0 转为 7（周日）
 
 onMounted(async () => {
@@ -223,7 +223,7 @@ const todayAttendanceCount = computed(() => {
 
 // 本月点名次数
 const thisMonthAttendanceCount = computed(() => {
-  const thisMonth = today.toISOString().slice(0, 7)
+  const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
   return attendance.value.filter(r => r.date.startsWith(thisMonth)).length
 })
 

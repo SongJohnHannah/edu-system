@@ -10,14 +10,23 @@
           </svg>
           <span class="logo-text">嘉言思听教务系统 <span class="version">v{{ appVersion }}</span></span>
         </div>
-        <nav class="nav">
+        <nav class="nav" ref="navRef">
           <router-link to="/" class="nav-item" exact-active-class="active">首页</router-link>
           <router-link to="/students" class="nav-item" active-class="active">学生</router-link>
-          <router-link to="/teachers" class="nav-item" active-class="active" v-if="isAdmin">教师</router-link>
           <router-link to="/courses" class="nav-item" active-class="active">课程安排</router-link>
           <router-link to="/attendance" class="nav-item" active-class="active">点名</router-link>
           <router-link to="/calendar" class="nav-item" active-class="active">日历</router-link>
-          <router-link to="/teacher-stats" class="nav-item" active-class="active">教师统计</router-link>
+          <div class="nav-more">
+            <button class="nav-item nav-more-btn" :class="{ active: showNavMore }" @click.stop="showNavMore = !showNavMore">
+              更多
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div class="nav-more-dropdown" v-if="showNavMore" @click.stop>
+              <router-link to="/teachers" class="nav-more-item" @click="showNavMore = false" v-if="isAdmin">教师管理</router-link>
+              <router-link to="/teacher-stats" class="nav-more-item" @click="showNavMore = false">教师统计</router-link>
+              <router-link to="/handovers" class="nav-more-item" @click="showNavMore = false" v-if="isAdmin">交接记录</router-link>
+            </div>
+          </div>
         </nav>
         <div class="header-actions">
           <router-link to="/profile" class="user-info" v-if="useApi && authUser">
@@ -122,12 +131,12 @@
         </svg>
         <span>日历</span>
       </router-link>
-      <router-link to="/more" class="tab-item" active-class="tab-active" @click.prevent="showMoreMenu = !showMoreMenu">
+      <a class="tab-item" :class="{ 'tab-active': showMoreMenu }" @click.prevent="showMoreMenu = !showMoreMenu">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
         </svg>
         <span>更多</span>
-      </router-link>
+      </a>
     </nav>
 
     <!-- 移动端更多菜单 -->
@@ -154,6 +163,15 @@
             <circle cx="12" cy="7" r="4"/>
           </svg>
           <span>个人资料</span>
+        </router-link>
+        <router-link to="/handovers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="8.5" cy="7" r="4"/>
+            <line x1="20" y1="8" x2="20" y2="14"/>
+            <line x1="23" y1="11" x2="17" y2="11"/>
+          </svg>
+          <span>交接记录</span>
         </router-link>
       </div>
     </div>
@@ -209,7 +227,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Toast from './components/Toast.vue'
 import { downloadBackup, importData, getStorePath, checkIsElectron } from './utils/storage'
@@ -219,9 +237,27 @@ const useApi = import.meta.env.VITE_USE_API === 'true'
 const router = useRouter()
 const toast = useToast()
 
+const vClickOutside = {
+  mounted(el, binding) {
+    el._handler = (e) => {
+      if (!el.contains(e.target)) binding.value()
+    }
+    document.addEventListener('click', el._handler, true)
+  },
+  unmounted(el) {
+    document.removeEventListener('click', el._handler, true)
+  }
+}
+
 const showBackupModal = ref(false)
 const showMoreMenu = ref(false)
+const showNavMore = ref(false)
 const importResult = ref(null)
+
+watch(() => router.currentRoute.value.path, () => {
+  showMoreMenu.value = false
+  showNavMore.value = false
+})
 const isElectronEnv = ref(false)
 const storePath = ref('')
 const appVersion = __APP_VERSION__
@@ -239,6 +275,7 @@ const currentPageTitle = computed(() => {
     '/calendar': '日历',
     '/teacher-stats': '教师统计',
     '/profile': '个人资料',
+    '/handovers': '交接记录',
     '/login': '登录'
   }
   return titles[route.path] || '教务系统'
@@ -260,6 +297,11 @@ onMounted(async () => {
     })
   }
 })
+
+function closeDropdowns(e) {
+  if (!e.target.closest('.nav-more')) showNavMore.value = false
+}
+document.addEventListener('click', closeDropdowns)
 
 const isAdmin = computed(() => {
   if (!useApi) return true
@@ -325,6 +367,7 @@ async function handleImport(event) {
   position: sticky;
   top: 0;
   z-index: 100;
+  overflow: visible;
 }
 
 .header-content {
@@ -335,6 +378,7 @@ async function handleImport(event) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  overflow: visible;
 }
 
 .logo {
@@ -360,6 +404,8 @@ async function handleImport(event) {
 .nav {
   display: flex;
   gap: 8px;
+  flex-wrap: nowrap;
+  overflow: visible;
 }
 
 .nav-item {
@@ -370,6 +416,8 @@ async function handleImport(event) {
   font-weight: 500;
   border-radius: var(--radius-sm);
   transition: var(--transition);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-item:hover {
@@ -380,6 +428,49 @@ async function handleImport(event) {
 .nav-item.active {
   color: var(--color-primary);
   background: rgba(0, 113, 227, 0.1);
+}
+
+.nav-more {
+  position: relative;
+}
+
+.nav-more-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-family: inherit;
+}
+
+.nav-more-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: white;
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  min-width: 140px;
+  z-index: 200;
+  overflow: hidden;
+}
+
+.nav-more-item {
+  display: block;
+  padding: 10px 16px;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.nav-more-item:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
 }
 
 .header-actions {
@@ -517,6 +608,9 @@ async function handleImport(event) {
   transition: color 0.2s;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .tab-item:active {
@@ -669,17 +763,14 @@ async function handleImport(event) {
   padding-left: 78px;
 }
 
-/* ===== 桌面端：隐藏移动端元素 ===== */
-@media (max-width: 900px) {
-  .header-content {
-    padding: 0 16px;
-  }
+/* ===== 平板/移动端适配 ===== */
+@media (max-width: 1100px) {
   .nav-item {
-    padding: 6px 12px;
+    padding: 6px 10px;
     font-size: 13px;
   }
   .logo-text {
-    font-size: 16px;
+    font-size: 15px;
   }
   .header-actions .btn-sm span {
     display: none;
@@ -689,8 +780,14 @@ async function handleImport(event) {
   }
 }
 
-/* ===== 移动端：切换为底部 Tab 导航 ===== */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
+  .header-content {
+    padding: 0 16px;
+  }
+}
+
+/* ===== 移动端/平板：切换为底部 Tab 导航 ===== */
+@media (max-width: 1024px) {
   .desktop-nav {
     display: none;
   }

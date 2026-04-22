@@ -105,7 +105,8 @@ onMounted(async () => {
   students.value = s || []
   teachers.value = t || []
 
-  selectedDate.value = new Date().toISOString().split('T')[0]
+  const now = new Date()
+  selectedDate.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 })
 
 const currentYear = computed(() => currentDate.value.getFullYear())
@@ -229,7 +230,8 @@ function nextMonth() {
 
 function goToday() {
   currentDate.value = new Date()
-  selectedDate.value = new Date().toISOString().split('T')[0]
+  const now = new Date()
+  selectedDate.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
 function selectDate(day) {

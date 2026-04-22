@@ -337,5 +337,19 @@ function goBack() {
     flex-wrap: wrap;
     gap: 16px;
   }
+
+  .stats-card {
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .stat-item {
+    min-width: 60px;
+  }
+
+  .stat-divider {
+    display: none;
+  }
 }
 </style>

@@ -23,7 +23,11 @@ class ApiClient {
     const headers = { 'Content-Type': 'application/json' }
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`
     const opts = { method, headers }
-    if (body) opts.body = JSON.stringify(body)
+    if (body) {
+      // 自动标记所有测试数据
+      const taggedBody = typeof body === 'object' ? { ...body, isTest: true } : body
+      opts.body = JSON.stringify(taggedBody)
+    }
     const res = await fetch(`${this.baseURL}${API}${path}`, opts)
     return res
   }

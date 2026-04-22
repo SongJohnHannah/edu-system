@@ -135,9 +135,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getCourses, addCourse, updateCourse, deleteCourse, getTeachers, getStudents } from '../utils/storage'
+import { useToast } from '../composables/useToast'
 
+const toast = useToast()
 const courses = ref([])
 const teachers = ref([])
 const students = ref([])
@@ -160,14 +162,29 @@ const form = ref({
   studentIds: []
 })
 
-onMounted(async () => {
+async function loadData() {
   const [c, t, s] = await Promise.all([
     getCourses(), getTeachers(), getStudents()
   ])
   courses.value = c || []
   teachers.value = t || []
   students.value = s || []
+}
+
+onMounted(async () => {
+  await loadData()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 })
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    loadData()
+  }
+}
 
 // 过滤学生列表
 const filteredStudents = computed(() => {
@@ -227,11 +244,22 @@ async function saveCourse() {
   submitting.value = true
   try {
     if (editingCourse.value) {
+      // 编辑前刷新确认课程仍可操作（防止移交后编辑）
+      const freshCourses = await getCourses()
+      const stillExists = (freshCourses || []).find(c => c.id === editingCourse.value.id)
+      if (!stillExists) {
+        toast.error('该课程已移交，无法编辑')
+        courses.value = freshCourses || []
+        closeModal()
+        return
+      }
       courses.value = await updateCourse(editingCourse.value.id, form.value)
     } else {
       courses.value = await addCourse(form.value)
     }
     closeModal()
+  } catch (err) {
+    toast.error(err.message || '保存失败')
   } finally {
     submitting.value = false
   }
@@ -251,6 +279,8 @@ async function confirmDeleteCourse() {
   try {
     courses.value = await deleteCourse(deleteTargetId.value)
     showConfirmModal.value = false
+  } catch (err) {
+    toast.error(err.message || '删除失败')
   } finally {
     submitting.value = false
   }
@@ -489,5 +519,39 @@ function closeModal() {
   color: var(--color-text);
   line-height: 1.6;
   margin-bottom: 0;
+}
+
+@media (max-width: 768px) {
+  .page-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .course-header {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .course-details {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  .form-row:last-of-type {
+    grid-template-columns: 1fr;
+  }
+  .student-select {
+    flex-direction: column;
+  }
+  .modal {
+    margin: 16px;
+    padding: 24px;
+  }
+  .modal-actions {
+    flex-direction: column;
+  }
+  .modal-actions .btn {
+    width: 100%;
+  }
 }
 </style>
