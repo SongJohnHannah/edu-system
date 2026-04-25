@@ -170,7 +170,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
-import { getCourses, getStudents, getTeachers, getAttendance, getAttendancePage, addAttendance, deductHours, removeStudentsFromRecord } from '../utils/storage'
+import { getCourses, getStudents, getTeachers, getAttendance, getAttendancePage, addAttendance, removeStudentsFromRecord } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 import SearchSelect from '../components/SearchSelect.vue'
 
@@ -235,6 +235,13 @@ function pickMonth(m) {
   filterMonth.value = `${monthDropdownYear.value}-${String(m).padStart(2, '0')}`
   showMonthDropdown.value = false
 }
+
+function closeMonthDropdown(e) {
+  if (showMonthDropdown.value && !e.target.closest('.month-picker')) {
+    showMonthDropdown.value = false
+  }
+}
+
 const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
@@ -278,10 +285,12 @@ async function loadData() {
 onMounted(async () => {
   await loadData()
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  document.addEventListener('click', closeMonthDropdown, true)
 })
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+  document.removeEventListener('click', closeMonthDropdown, true)
 })
 
 function handleVisibilityChange() {

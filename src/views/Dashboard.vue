@@ -229,7 +229,7 @@ const thisMonthAttendanceCount = computed(() => {
 
 // 课时预警学生
 const lowHoursStudents = computed(() => {
-  return students.value.filter(s => (s.totalHours - s.usedHours) < 3 && (s.totalHours - s.usedHours) > 0)
+  return students.value.filter(s => (s.totalHours - (s.usedHours || 0)) < 3 && (s.totalHours - (s.usedHours || 0)) > 0)
 })
 </script>
 

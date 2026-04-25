@@ -80,10 +80,25 @@ export async function create(data, teacherScope) {
   }
 
   const id = generateId()
-  await pool.execute(
-    'INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [id, data.studentId, data.type, data.hours, data.remark || '', data.relatedId || null, data.operator || 'manual']
-  )
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    await conn.execute(
+      'INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, data.studentId, data.type, data.hours, data.remark || '', data.relatedId || null, data.operator || 'manual']
+    )
+    if (data.type === 'add') {
+      await conn.execute('UPDATE students SET total_hours = total_hours + ? WHERE id = ?', [data.hours, data.studentId])
+    } else if (data.type === 'subtract' || data.type === 'deduct') {
+      await conn.execute('UPDATE students SET used_hours = used_hours + ? WHERE id = ?', [data.hours, data.studentId])
+    }
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
   const [rows] = await pool.execute('SELECT * FROM hour_records WHERE id = ?', [id])
   return rows[0] ? formatRecord(rows[0]) : null
 }

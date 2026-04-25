@@ -149,7 +149,9 @@ const totalRestored = computed(() => {
 })
 
 function formatDate(timestamp) {
+  if (!timestamp) return '-'
   const date = new Date(timestamp)
+  if (isNaN(date.getTime())) return '-'
   return date.toLocaleDateString('zh-CN', {
     year: 'numeric',
     month: '2-digit',

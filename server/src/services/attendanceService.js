@@ -51,9 +51,14 @@ export async function create(data, teacherScope, user) {
     await conn.beginTransaction()
 
     if (teacherScope) {
-      const [courses] = await conn.execute('SELECT teacher_id FROM courses WHERE id = ?', [data.courseId])
+      const [courses] = await conn.execute('SELECT teacher_id, student_ids FROM courses WHERE id = ?', [data.courseId])
       if (!courses[0] || courses[0].teacher_id !== teacherScope) {
         throw new Error('无权操作该课程')
+      }
+      const courseStudents = typeof courses[0].student_ids === 'string' ? JSON.parse(courses[0].student_ids) : (courses[0].student_ids || [])
+      const invalidIds = data.studentIds.filter(sid => !courseStudents.includes(sid))
+      if (invalidIds.length > 0) {
+        throw new Error('部分学生不属于该课程')
       }
     }
 

@@ -153,7 +153,7 @@ export async function deleteAttendance(attendanceId) {
 
 export async function removeStudentsFromRecord(attendanceId, studentIdsToRemove) {
   await api.post(`/attendance/${attendanceId}/remove-students`, { studentIds: studentIdsToRemove })
-  const result = await api.get('/attendance')
+  const result = await api.get('/attendance?limit=50')
   if (Array.isArray(result)) return result
   return result.data || result
 }
@@ -214,7 +214,7 @@ export async function getClassName(classId) {
 
 export async function exportData() {
   const resp = await fetch('/edusystem/api/backup/export', {
-    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+    headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
   })
   return await resp.text()
 }
@@ -230,6 +230,10 @@ export async function importData(fileContent) {
         },
         body: fileContent
       })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ message: `HTTP ${resp.status}` }))
+        return { success: false, message: err.message || err.error || 'SQL导入失败' }
+      }
       return await resp.json()
     }
     const importObj = JSON.parse(fileContent)

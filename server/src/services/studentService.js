@@ -130,6 +130,23 @@ export async function update(id, data) {
 }
 
 export async function remove(id) {
+  await pool.execute('DELETE FROM hour_records WHERE student_id = ?', [id])
+  const [records] = await pool.execute('SELECT id, student_ids FROM attendance WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
+  for (const r of records) {
+    const ids = typeof r.student_ids === 'string' ? JSON.parse(r.student_ids) : (r.student_ids || [])
+    const remaining = ids.filter(sid => sid !== id)
+    if (remaining.length === 0) {
+      await pool.execute('DELETE FROM attendance WHERE id = ?', [r.id])
+    } else {
+      await pool.execute('UPDATE attendance SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), r.id])
+    }
+  }
+  const [courses] = await pool.execute('SELECT id, student_ids FROM courses WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
+  for (const c of courses) {
+    const ids = typeof c.student_ids === 'string' ? JSON.parse(c.student_ids) : (c.student_ids || [])
+    const remaining = ids.filter(sid => sid !== id)
+    await pool.execute('UPDATE courses SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), c.id])
+  }
   await pool.execute('DELETE FROM students WHERE id = ?', [id])
 }
 
@@ -149,12 +166,22 @@ export async function updateStatus(id, status) {
 }
 
 export async function addHours(id, hours, remark, operator) {
-  await pool.execute('UPDATE students SET total_hours = total_hours + ? WHERE id = ?', [hours, id])
-  const recordId = generateId()
-  await pool.execute(
-    'INSERT INTO hour_records (id, student_id, type, hours, remark, operator) VALUES (?, ?, ?, ?, ?, ?)',
-    [recordId, id, 'add', hours, remark || '手动添加', operator || 'manual']
-  )
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    await conn.execute('UPDATE students SET total_hours = total_hours + ? WHERE id = ?', [hours, id])
+    const recordId = generateId()
+    await conn.execute(
+      'INSERT INTO hour_records (id, student_id, type, hours, remark, operator) VALUES (?, ?, ?, ?, ?, ?)',
+      [recordId, id, 'add', hours, remark || '手动添加', operator || 'manual']
+    )
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
   const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
   return rows[0] ? formatStudent(rows[0]) : null
 }
@@ -167,43 +194,63 @@ export async function subtractHours(id, hours, remark, operator) {
   if (hours > remaining) {
     throw new Error(`减课时数不能超过剩余课时（当前剩余 ${remaining} 课时）`)
   }
-  await pool.execute('UPDATE students SET total_hours = total_hours - ? WHERE id = ?', [hours, id])
-  const recordId = generateId()
-  await pool.execute(
-    'INSERT INTO hour_records (id, student_id, type, hours, remark, operator) VALUES (?, ?, ?, ?, ?, ?)',
-    [recordId, id, 'subtract', hours, remark || '手动减少', operator || 'manual']
-  )
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    await conn.execute('UPDATE students SET total_hours = total_hours - ? WHERE id = ?', [hours, id])
+    const recordId = generateId()
+    await conn.execute(
+      'INSERT INTO hour_records (id, student_id, type, hours, remark, operator) VALUES (?, ?, ?, ?, ?, ?)',
+      [recordId, id, 'subtract', hours, remark || '手动减少', operator || 'manual']
+    )
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
   const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
   return rows[0] ? formatStudent(rows[0]) : null
 }
 
 export async function addBatch(studentList, defaultHours, createdBy = 'admin', creatorId = null) {
+  const conn = await pool.getConnection()
   let addedCount = 0
   const skipped = []
-  for (const student of studentList) {
-    if (student.name && student.name.trim()) {
-      const name = student.name.trim()
-      const [dup] = await pool.execute('SELECT id FROM students WHERE name = ?', [name])
-      if (dup.length > 0) {
-        skipped.push(name)
-        continue
-      }
-      if (student.phone) {
-        const [phoneDup] = await pool.execute('SELECT id FROM students WHERE phone = ? AND phone != ""', [student.phone])
-        if (phoneDup.length > 0) {
+  try {
+    await conn.beginTransaction()
+    for (const student of studentList) {
+      if (student.name && student.name.trim()) {
+        const name = student.name.trim()
+        const [dup] = await conn.execute('SELECT id FROM students WHERE name = ?', [name])
+        if (dup.length > 0) {
           skipped.push(name)
           continue
         }
+        if (student.phone) {
+          const [phoneDup] = await conn.execute('SELECT id FROM students WHERE phone = ? AND phone != ""', [student.phone])
+          if (phoneDup.length > 0) {
+            skipped.push(name)
+            continue
+          }
+        }
+        const id = generateId()
+        await conn.execute(
+          `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
+           VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
+          [id, name, '', student.age || null, '', student.totalHours || defaultHours || 0, student.classId || '',
+           createdBy, creatorId, student.isTest ? 1 : 0]
+        )
+        addedCount++
       }
-      const id = generateId()
-      await pool.execute(
-        `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
-        [id, name, '', student.age || null, '', student.totalHours || defaultHours || 0, student.classId || '',
-         createdBy, creatorId, student.isTest ? 1 : 0]
-      )
-      addedCount++
     }
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
   }
   return { addedCount, skipped }
 }

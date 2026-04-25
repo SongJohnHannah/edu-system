@@ -264,11 +264,26 @@ function showTooltip(day, event) {
   }
 
   const rect = event.target.getBoundingClientRect()
-  tooltipStyle.value = {
-    position: 'fixed',
-    left: `${rect.left + rect.width / 2}px`,
-    top: `${rect.top - 10}px`,
-    transform: 'translate(-50%, -100%)'
+  let left = rect.left + rect.width / 2
+  let top = rect.top - 10
+
+  // Clamp to viewport
+  const tooltipWidth = 200
+  left = Math.max(tooltipWidth / 2 + 8, Math.min(left, window.innerWidth - tooltipWidth / 2 - 8))
+  if (top < 60) {
+    tooltipStyle.value = {
+      position: 'fixed',
+      left: `${left}px`,
+      top: `${rect.bottom + 10}px`,
+      transform: 'translate(-50%, 0)'
+    }
+  } else {
+    tooltipStyle.value = {
+      position: 'fixed',
+      left: `${left}px`,
+      top: `${top}px`,
+      transform: 'translate(-50%, -100%)'
+    }
   }
 
   tooltipVisible.value = true

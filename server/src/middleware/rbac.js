@@ -18,6 +18,8 @@ export function filterByTeacher(req, res, next) {
     req.teacherScope = null
   } else if (req.user.role === 'teacher') {
     req.teacherScope = req.user.teacherId
+  } else {
+    return res.status(403).json({ error: '未知角色' })
   }
   next()
 }

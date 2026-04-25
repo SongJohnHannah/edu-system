@@ -32,7 +32,7 @@ export async function getTeacherStats(startDate, endDate, teacherScope) {
     SELECT a.recorded_by AS teacher_id,
            COUNT(a.id) AS attendance_count,
            COALESCE(SUM(
-             (a.hours_deducted || 1) * JSON_LENGTH(a.student_ids)
+             COALESCE(a.hours_deducted, 1) * JSON_LENGTH(a.student_ids)
            ), 0) AS consumed_hours
     FROM attendance a
     WHERE a.recorded_by IN (${teacherIds.map(() => '?').join(',')})
@@ -97,7 +97,7 @@ export async function getOverallStats(startDate, endDate, teacherScope) {
   const [stats] = await pool.execute(`
     SELECT COUNT(a.id) AS totalAttendance,
            COALESCE(SUM(
-             (a.hours_deducted || 1) * JSON_LENGTH(a.student_ids)
+             COALESCE(a.hours_deducted, 1) * JSON_LENGTH(a.student_ids)
            ), 0) AS totalConsumedHours,
            COUNT(DISTINCT a.recorded_by) AS activeTeachers
     FROM attendance a

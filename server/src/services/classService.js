@@ -31,6 +31,8 @@ export async function getById(id) {
 }
 
 export async function create(data) {
+  const [dup] = await pool.execute('SELECT id FROM classes WHERE name = ?', [data.name])
+  if (dup.length > 0) throw new Error('班级名称已存在')
   const id = generateId()
   await pool.execute('INSERT INTO classes (id, name, is_test) VALUES (?, ?, ?)', [id, data.name, data.isTest ? 1 : 0])
   const [rows] = await pool.execute('SELECT * FROM classes WHERE id = ?', [id])
@@ -38,11 +40,14 @@ export async function create(data) {
 }
 
 export async function update(id, data) {
+  const [existing] = await pool.execute('SELECT id FROM classes WHERE id = ?', [id])
+  if (existing.length === 0) throw new Error('班级不存在')
   await pool.execute('UPDATE classes SET name = ? WHERE id = ?', [data.name, id])
   const [rows] = await pool.execute('SELECT * FROM classes WHERE id = ?', [id])
   return rows[0] ? formatClass(rows[0]) : null
 }
 
 export async function remove(id) {
+  await pool.execute('UPDATE students SET class_id = \'\' WHERE class_id = ?', [id])
   await pool.execute('DELETE FROM classes WHERE id = ?', [id])
 }

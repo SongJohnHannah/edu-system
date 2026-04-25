@@ -81,8 +81,12 @@ export async function exportSQL() {
     if (typeof val === 'number') return String(val)
     if (typeof val === 'boolean') return val ? '1' : '0'
     if (Buffer.isBuffer(val)) return `X'${val.toString('hex')}'`
-    if (Array.isArray(val) || typeof val === 'object') return `'${JSON.stringify(val).replace(/'/g, "\\'")}'`
-    return `'${String(val).replace(/'/g, "\\'")}'`
+    if (Array.isArray(val) || typeof val === 'object') {
+      const s = JSON.stringify(val).replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+      return `'${s}'`
+    }
+    const s = String(val).replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+    return `'${s}'`
   }
 
   function insertBlock(table, columns, rows) {
@@ -149,7 +153,7 @@ export async function importData(data) {
            s.totalHours || s.total_hours || 0, s.usedHours || s.used_hours || 0,
            s.status || 'active', s.classId || s.class_id || '',
            s.createdBy || s.created_by || 'admin', s.creatorId || s.creator_id || null,
-           s.isTest || s.is_test ? 1 : 0,
+           (s.isTest || s.is_test) ? 1 : 0,
            s.createdAt || new Date().toISOString().slice(0, 19).replace('T', ' '),
            s.updatedAt || new Date().toISOString().slice(0, 19).replace('T', ' ')]
         )
@@ -179,7 +183,7 @@ export async function importData(data) {
            JSON.stringify(a.studentIds || []),
            a.hoursDeducted || a.hours_deducted || 1,
            a.recordedBy || a.recorded_by || null,
-           a.isTest || a.is_test ? 1 : 0,
+           (a.isTest || a.is_test) ? 1 : 0,
            a.createdAt || new Date().toISOString().slice(0, 19).replace('T', ' ')]
         )
       }
@@ -191,7 +195,7 @@ export async function importData(data) {
           'INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator, is_test, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
           [r.id, r.studentId || r.student_id, r.type, r.hours, r.remark || '',
            r.relatedId || r.related_id, r.operator || 'manual',
-           r.isTest || r.is_test ? 1 : 0,
+           (r.isTest || r.is_test) ? 1 : 0,
            r.createdAt || new Date().toISOString().slice(0, 19).replace('T', ' ')]
         )
       }

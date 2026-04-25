@@ -276,6 +276,16 @@ const submitting = ref(false)
 
 async function saveCourse() {
   if (submitting.value) return
+
+  if (form.value.startTime && form.value.endTime && form.value.startTime >= form.value.endTime) {
+    toast.error('结束时间必须晚于开始时间')
+    return
+  }
+  const hpc = Number(form.value.hoursPerClass)
+  if (!hpc || hpc <= 0) {
+    form.value.hoursPerClass = 1
+  }
+
   submitting.value = true
   try {
     if (editingCourse.value) {
@@ -393,12 +403,6 @@ function closeModal() {
 .courses-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
-}
-
-.courses-list {
-  display: flex;
-  flex-direction: column;
   gap: 16px;
 }
 

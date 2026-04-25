@@ -277,10 +277,10 @@
     <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
       <div class="modal modal-sm">
         <h2 class="modal-title">{{ confirmData.title }}</h2>
-        <p class="confirm-message" v-if="confirmData.message" v-html="confirmData.message"></p>
+        <p class="confirm-message" v-if="confirmData.message">{{ confirmData.message }}</p>
         <div class="modal-actions">
           <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-          <button class="btn btn-primary" :style="confirmData.danger ? 'background: var(--color-danger)' : ''" @click="confirmData.onConfirm(); showConfirmModal = false">确认</button>
+          <button class="btn btn-primary" :style="confirmData.danger ? 'background: var(--color-danger)' : ''" @click="handleConfirm">确认</button>
         </div>
       </div>
     </div>
@@ -291,7 +291,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getStudents, addStudent, updateStudent, deleteStudent, updateStudentStatus, addStudentsBatch, addHours, subtractHours, checkStudentNameExists } from '../utils/storage'
 import { useToast } from '../composables/useToast'
@@ -336,9 +336,17 @@ const statusForm = ref({
   status: 'active'
 })
 
-onMounted(async () => {
+async function loadData() {
   students.value = await getStudents() || []
-})
+}
+
+onMounted(loadData)
+
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') loadData()
+}
+onMounted(() => document.addEventListener('visibilitychange', handleVisibilityChange))
+onUnmounted(() => document.removeEventListener('visibilitychange', handleVisibilityChange))
 
 const filteredStudents = computed(() => {
   let result = students.value
@@ -438,12 +446,12 @@ function removeStudent(student) {
 
   const remaining = student.totalHours - (student.usedHours || 0)
   const warning = remaining > 0
-    ? `<br><span style="color: var(--color-warning)">该学生还有 ${remaining} 节剩余课时！</span>`
+    ? `该学生还有 ${remaining} 节剩余课时！\n`
     : ''
 
   confirmData.value = {
     title: '删除学生',
-    message: `确定要删除学生"${student.name}"吗？${warning}<br><br><span style="font-size: 13px; color: var(--color-text-secondary)">删除后该学生的历史数据将保留，但无法进行任何操作。</span>`,
+    message: `确定要删除学生"${student.name}"吗？\n${warning}删除后该学生的历史数据将保留，但无法进行任何操作。`,
     onConfirm: async () => { students.value = await updateStudentStatus(student.id, 'deleted') },
     danger: true
   }
@@ -599,6 +607,14 @@ function showNameTip(student, event) {
     transform: 'translateY(-100%)'
   }
   nameTipVisible.value = true
+  setTimeout(() => { nameTipVisible.value = false }, 3000)
+}
+
+async function handleConfirm() {
+  try {
+    await confirmData.value.onConfirm()
+    showConfirmModal.value = false
+  } catch {}
 }
 
 // 跳转到课时历史
