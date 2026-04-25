@@ -47,6 +47,11 @@ export async function addHours(studentId, hours, remark = '') {
   return api.get('/students')
 }
 
+export async function subtractHours(studentId, hours, remark = '') {
+  await api.post(`/students/${studentId}/subtract-hours`, { hours, remark })
+  return api.get('/students')
+}
+
 // ========== 教师相关 ==========
 
 export async function getTeachers() {

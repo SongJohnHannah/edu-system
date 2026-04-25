@@ -59,13 +59,15 @@ export async function create(data) {
 
   // 同时创建关联的 user 账号
   const username = data.phone || `teacher_${id}`
+  const isTest = !!data.isTest
   try {
     await authService.createUser({
       username,
       password: DEFAULT_PASSWORD,
       role: 'teacher',
       teacherId: id,
-      displayName: data.name
+      displayName: data.name,
+      isTest
     })
   } catch (err) {
     // 用户名可能重复（手机号已存在），用备用用户名
@@ -75,7 +77,8 @@ export async function create(data) {
         password: DEFAULT_PASSWORD,
         role: 'teacher',
         teacherId: id,
-        displayName: data.name
+        displayName: data.name,
+        isTest
       })
     } else {
       throw err

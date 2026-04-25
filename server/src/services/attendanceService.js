@@ -31,9 +31,15 @@ export async function getAll(teacherScope, { limit = 50, offset = 0 } = {}) {
   const [rows] = await pool.execute(`
     SELECT * FROM attendance
     WHERE recorded_by = ?
+      OR course_id IN (SELECT id FROM courses WHERE teacher_id = ?)
+      OR EXISTS (
+        SELECT 1 FROM students s
+        WHERE JSON_CONTAINS(attendance.student_ids, JSON_QUOTE(s.id))
+        AND (s.creator_id = ? OR EXISTS (SELECT 1 FROM courses c WHERE JSON_CONTAINS(c.student_ids, JSON_QUOTE(s.id)) AND c.teacher_id = ?))
+      )
     ORDER BY created_at DESC
     LIMIT ${fetchCount} OFFSET ${offsetNum}
-  `, [teacherScope])
+  `, [teacherScope, teacherScope, teacherScope, teacherScope])
   const hasMore = rows.length > limitNum
   const data = hasMore ? rows.slice(0, limitNum) : rows
   return { data: data.map(formatAttendance), hasMore }

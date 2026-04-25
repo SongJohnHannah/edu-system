@@ -61,7 +61,7 @@
             </td>
             <td>
               <div class="action-buttons" v-if="student.status === 'active'">
-                <button class="btn btn-text" @click="openAddHoursModal(student)" title="添加课时">加课</button>
+                <button class="btn btn-text" @click="openAddHoursModal(student)" title="加减课时">加减课</button>
                 <button class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</button>
                 <button class="btn btn-text" @click="editStudent(student)">编辑</button>
                 <button class="btn btn-text" style="color: var(--color-danger)" @click="removeStudent(student)">删除</button>
@@ -86,17 +86,17 @@
     <div class="mobile-card-list mobile-only" v-if="filteredStudents.length > 0">
       <div class="mobile-card" v-for="student in filteredStudents" :key="student.id" :class="{ 'card-deleted': student.status === 'deleted' || student.status === 'quit' }">
         <div class="mobile-card-sticky">
-          <div class="mobile-card-main">
-            <strong class="mobile-name">{{ student.name }}</strong>
+          <strong class="mobile-name" @click="showNameTip(student, $event)">{{ student.name }}</strong>
+          <div class="mobile-right-info">
             <span class="mobile-remaining" :class="getHoursStatusClass(student)">{{ student.totalHours - (student.usedHours || 0) }} 课时</span>
+            <span class="badge mobile-status-badge" :class="getStudentStatusClass(student)" @click="openStatusMenu(student)">
+              {{ getStudentStatusText(student) }}
+            </span>
           </div>
-          <span class="badge mobile-status-badge" :class="getStudentStatusClass(student)" @click="openStatusMenu(student)">
-            {{ getStudentStatusText(student) }}
-          </span>
         </div>
         <div class="mobile-card-actions">
           <template v-if="student.status === 'active'">
-            <button class="btn btn-text" @click="openAddHoursModal(student)">加课</button>
+            <button class="btn btn-text" @click="openAddHoursModal(student)">加减课</button>
             <button class="btn btn-text" @click="goToHistory(student.id)">历史</button>
             <button class="btn btn-text" @click="editStudent(student)">编辑</button>
             <button class="btn btn-text btn-danger-text" @click="removeStudent(student)">删除</button>
@@ -205,10 +205,10 @@
       </div>
     </div>
 
-    <!-- 添加课时弹窗 -->
+    <!-- 加减课时弹窗 -->
     <div class="modal-overlay" v-if="showHoursModal" @click.self="closeHoursModal">
       <div class="modal">
-        <h2 class="modal-title">添加课时</h2>
+        <h2 class="modal-title">加减课时</h2>
         <div class="hours-info">
           <div class="info-row">
             <span class="info-label">学生</span>
@@ -221,16 +221,30 @@
         </div>
         <form @submit.prevent="saveAddHours">
           <div class="form-group">
-            <label>添加课时数 *</label>
-            <input type="number" class="input" v-model.number="addHoursForm.hours" required min="1" placeholder="请输入要添加的课时数" />
+            <label>操作类型 *</label>
+            <div class="hours-type-options">
+              <button type="button" class="hours-type-btn" :class="{ active: addHoursForm.type === 'add', 'type-add': addHoursForm.type === 'add' }" @click="addHoursForm.type = 'add'">
+                <span class="type-sign">+</span>
+                <span class="type-label">加课时</span>
+              </button>
+              <button type="button" class="hours-type-btn" :class="{ active: addHoursForm.type === 'subtract', 'type-subtract': addHoursForm.type === 'subtract' }" @click="addHoursForm.type = 'subtract'">
+                <span class="type-sign">−</span>
+                <span class="type-label">减课时</span>
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>{{ addHoursForm.type === 'add' ? '增加课时数' : '减少课时数' }} *</label>
+            <input type="number" class="input" v-model.number="addHoursForm.hours" required min="1" :max="addHoursForm.type === 'subtract' ? (hoursStudent ? hoursStudent.totalHours - (hoursStudent.usedHours || 0) : 1) : undefined" :placeholder="addHoursForm.type === 'add' ? '请输入要增加的课时数' : '请输入要减少的课时数'" />
+            <span class="form-hint" v-if="addHoursForm.type === 'subtract' && hoursStudent">最多可减少 {{ hoursStudent.totalHours - (hoursStudent.usedHours || 0) }} 课时</span>
           </div>
           <div class="form-group">
             <label>备注</label>
-            <input type="text" class="input" v-model="addHoursForm.remark" placeholder="如：续费20课时" />
+            <input type="text" class="input" v-model="addHoursForm.remark" :placeholder="addHoursForm.type === 'add' ? '如：续费20课时' : '如：输错修正'" />
           </div>
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" @click="closeHoursModal">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '提交中...' : '确认添加' }}</button>
+            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '提交中...' : '确认' }}</button>
           </div>
         </form>
       </div>
@@ -270,13 +284,16 @@
         </div>
       </div>
     </div>
+
+    <!-- 移动端姓名提示 -->
+    <div class="name-tip" v-if="nameTipVisible" :style="nameTipStyle" @click="nameTipVisible = false">{{ nameTipText }}</div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getStudents, addStudent, updateStudent, deleteStudent, updateStudentStatus, addStudentsBatch, addHours, checkStudentNameExists } from '../utils/storage'
+import { getStudents, addStudent, updateStudent, deleteStudent, updateStudentStatus, addStudentsBatch, addHours, subtractHours, checkStudentNameExists } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 
 const router = useRouter()
@@ -310,6 +327,7 @@ const batchRows = ref([{ name: '', age: null }])
 const batchDefaultHours = ref(0)
 
 const addHoursForm = ref({
+  type: 'add',
   hours: 1,
   remark: ''
 })
@@ -509,7 +527,7 @@ async function saveBatchStudents() {
 // 添加课时
 function openAddHoursModal(student) {
   hoursStudent.value = student
-  addHoursForm.value = { hours: 1, remark: '' }
+  addHoursForm.value = { type: 'add', hours: 1, remark: '' }
   showHoursModal.value = true
 }
 
@@ -523,11 +541,16 @@ async function saveAddHours() {
 
   submitting.value = true
   try {
-    students.value = await addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
-    toast.success(`已为 ${hoursStudent.value.name} 添加 ${addHoursForm.value.hours} 课时`)
+    if (addHoursForm.value.type === 'add') {
+      students.value = await addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
+      toast.success(`已为 ${hoursStudent.value.name} 增加 ${addHoursForm.value.hours} 课时`)
+    } else {
+      students.value = await subtractHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
+      toast.success(`已为 ${hoursStudent.value.name} 减少 ${addHoursForm.value.hours} 课时`)
+    }
     closeHoursModal()
   } catch (err) {
-    toast.error(err.message || '添加课时失败')
+    toast.error(err.message || '操作失败')
   } finally {
     submitting.value = false
   }
@@ -559,9 +582,29 @@ async function saveStatus() {
   }
 }
 
+// 移动端姓名提示
+const nameTipVisible = ref(false)
+const nameTipStyle = ref({})
+const nameTipText = ref('')
+
+function showNameTip(student, event) {
+  const el = event.target
+  if (el.scrollWidth <= el.clientWidth) return
+  nameTipText.value = student.name
+  const rect = el.getBoundingClientRect()
+  nameTipStyle.value = {
+    position: 'fixed',
+    left: `${rect.left}px`,
+    top: `${rect.top - 8}px`,
+    transform: 'translateY(-100%)'
+  }
+  nameTipVisible.value = true
+}
+
 // 跳转到课时历史
 function goToHistory(studentId) {
-  router.push({ path: '/hours-history', query: { studentId } })
+  const route = router.resolve({ path: '/hours-history', query: { studentId } })
+  window.open(route.href, '_blank')
 }
 </script>
 
@@ -806,6 +849,50 @@ function goToHistory(studentId) {
   margin-bottom: 20px;
 }
 
+/* 加减课时类型选择 */
+.hours-type-options {
+  display: flex;
+  gap: 12px;
+}
+
+.hours-type-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: white;
+  cursor: pointer;
+  transition: var(--transition);
+  font-size: 14px;
+}
+
+.hours-type-btn:hover {
+  border-color: var(--color-primary);
+}
+
+.hours-type-btn.active.type-add {
+  border-color: var(--color-success);
+  background: rgba(52, 199, 89, 0.05);
+}
+
+.hours-type-btn.active.type-subtract {
+  border-color: var(--color-danger);
+  background: rgba(255, 59, 48, 0.05);
+}
+
+.type-sign {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.type-add .type-sign { color: var(--color-success); }
+.type-subtract .type-sign { color: var(--color-danger); }
+.type-label { font-weight: 500; }
+
 .info-row {
   display: flex;
   justify-content: space-between;
@@ -929,14 +1016,34 @@ function goToHistory(studentId) {
   gap: 8px;
 }
 
-.mobile-card-main {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
 .mobile-name {
   font-size: 15px;
+  max-width: 5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.mobile-right-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.name-tip {
+  position: fixed;
+  background: rgba(29, 29, 31, 0.92);
+  color: white;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 2000;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
 }
 
 .mobile-remaining {

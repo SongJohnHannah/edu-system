@@ -45,7 +45,7 @@ test.describe('学生管理', () => {
     await adminPage.waitForLoadState('networkidle')
     await adminPage.fill('input[placeholder*="搜索"]', name)
     await adminPage.waitForTimeout(1000)
-    await expect(adminPage.locator('text=' + name)).toBeVisible()
+    await expect(adminPage.locator('text=' + name).first()).toBeVisible()
   })
 
   test('编辑学生信息', async ({ adminPage }) => {
@@ -75,7 +75,7 @@ test.describe('学生管理', () => {
     await adminPage.goto('/students')
     await adminPage.waitForLoadState('networkidle')
     const row = adminPage.locator('tr:has-text("' + name + '")')
-    await row.locator('button:has-text("加课")').first().click()
+    await row.locator('button:has-text("加减课")').first().click()
     await adminPage.fill('.modal input[placeholder*="课时"]', '3')
     await adminPage.fill('.modal input[placeholder*="续费"], .modal input[placeholder*="备注"]', '测试充值')
     await adminPage.click('.modal button:has-text("确认")')

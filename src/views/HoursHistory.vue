@@ -29,6 +29,10 @@
         <span class="stat-value add">+{{ totalAdded }}</span>
       </div>
       <div class="stat-item">
+        <span class="stat-label">累计减少</span>
+        <span class="stat-value subtract">-{{ totalSubtracted }}</span>
+      </div>
+      <div class="stat-item">
         <span class="stat-label">累计扣除</span>
         <span class="stat-value deduct">-{{ totalDeducted }}</span>
       </div>
@@ -39,12 +43,18 @@
     </div>
 
     <div class="filter-bar" v-if="records.length > 0">
-      <select class="input" v-model="filterType">
-        <option value="">全部类型</option>
-        <option value="add">添加</option>
-        <option value="deduct">扣除</option>
-        <option value="restore">还原</option>
-      </select>
+      <SearchSelect
+        v-model="filterType"
+        :options="[
+          { value: '', label: '全部类型' },
+          { value: 'add', label: '添加' },
+          { value: 'subtract', label: '减少' },
+          { value: 'deduct', label: '扣除' },
+          { value: 'restore', label: '还原' }
+        ]"
+        placeholder="全部类型"
+        :searchable="false"
+      />
     </div>
 
     <div class="table-container">
@@ -66,7 +76,7 @@
               </span>
             </td>
             <td :class="getHoursClass(record.type)">
-              {{ record.type === 'deduct' ? '-' : '+' }}{{ record.hours }}
+              {{ (record.type === 'deduct' || record.type === 'subtract') ? '-' : '+' }}{{ record.hours }}
             </td>
             <td>{{ record.remark || '-' }}</td>
           </tr>
@@ -83,6 +93,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getStudents, getHourRecordsByStudent } from '../utils/storage'
+import SearchSelect from '../components/SearchSelect.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -119,6 +130,12 @@ const totalAdded = computed(() => {
     .reduce((sum, r) => sum + r.hours, 0)
 })
 
+const totalSubtracted = computed(() => {
+  return records.value
+    .filter(r => r.type === 'subtract')
+    .reduce((sum, r) => sum + r.hours, 0)
+})
+
 const totalDeducted = computed(() => {
   return records.value
     .filter(r => r.type === 'deduct')
@@ -145,6 +162,7 @@ function formatDate(timestamp) {
 function getTypeClass(type) {
   const classes = {
     add: 'badge-success',
+    subtract: 'badge-warning',
     deduct: 'badge-danger',
     restore: 'badge-info'
   }
@@ -154,6 +172,7 @@ function getTypeClass(type) {
 function getTypeText(type) {
   const texts = {
     add: '添加',
+    subtract: '减少',
     deduct: '扣除',
     restore: '还原'
   }
@@ -161,7 +180,7 @@ function getTypeText(type) {
 }
 
 function getHoursClass(type) {
-  if (type === 'deduct') return 'hours-deduct'
+  if (type === 'deduct' || type === 'subtract') return 'hours-deduct'
   return 'hours-add'
 }
 
@@ -280,6 +299,7 @@ function goBack() {
 }
 
 .stat-value.add { color: var(--color-success); }
+.stat-value.subtract { color: var(--color-warning); }
 .stat-value.deduct { color: var(--color-danger); }
 .stat-value.restore { color: var(--color-primary); }
 
@@ -313,6 +333,7 @@ function goBack() {
 }
 
 .badge-success { background: rgba(52, 199, 89, 0.1); color: var(--color-success); }
+.badge-warning { background: rgba(255, 149, 0, 0.1); color: var(--color-warning); }
 .badge-danger { background: rgba(255, 59, 48, 0.1); color: var(--color-danger); }
 .badge-info { background: rgba(0, 113, 227, 0.1); color: var(--color-primary); }
 .badge-secondary { background: rgba(142, 142, 147, 0.1); color: #8e8e93; }

@@ -131,20 +131,21 @@ async function handleLogin() {
 }
 
 .form-input {
+  width: 100%;
   padding: 12px 16px;
+  font-size: 15px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  font-size: 15px;
-  font-family: inherit;
-  color: var(--color-text);
-  background: var(--color-bg);
+  background: white;
   transition: var(--transition);
   outline: none;
+  font-family: inherit;
+  color: var(--color-text);
 }
 
 .form-input:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+  box-shadow: 0 0 0 4px rgba(0, 113, 227, 0.1);
 }
 
 .form-input:disabled {

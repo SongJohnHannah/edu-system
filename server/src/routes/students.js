@@ -65,6 +65,16 @@ router.post('/:id/add-hours', filterByTeacher, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+router.post('/:id/subtract-hours', filterByTeacher, async (req, res, next) => {
+  try {
+    await studentService.verifyAccess(req.params.id, req.teacherScope)
+    const student = await studentService.subtractHours(
+      req.params.id, req.body.hours, req.body.remark, req.user.username
+    )
+    res.json(student)
+  } catch (err) { next(err) }
+})
+
 router.post('/batch', filterByTeacher, async (req, res, next) => {
   try {
     const createdBy = req.user.role === 'admin' ? 'admin' : 'teacher'

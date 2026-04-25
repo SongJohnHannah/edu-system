@@ -18,10 +18,14 @@ export async function getAll(teacherScope) {
   }
   const [rows] = await pool.execute(`
     SELECT hr.* FROM hour_records hr
-    JOIN courses c ON JSON_CONTAINS(c.student_ids, JSON_QUOTE(hr.student_id))
-    WHERE c.teacher_id = ?
+    WHERE hr.student_id IN (
+      SELECT DISTINCT s.id FROM students s
+      WHERE s.creator_id = ?
+      OR EXISTS (SELECT 1 FROM courses c WHERE JSON_CONTAINS(c.student_ids, JSON_QUOTE(s.id)) AND c.teacher_id = ?)
+      OR (s.created_by = 'admin' AND NOT EXISTS (SELECT 1 FROM courses c2 WHERE JSON_CONTAINS(c2.student_ids, JSON_QUOTE(s.id)) AND c2.teacher_id != ?))
+    )
     ORDER BY hr.created_at DESC
-  `, [teacherScope])
+  `, [teacherScope, teacherScope, teacherScope])
   return rows.map(formatRecord)
 }
 
@@ -38,24 +42,39 @@ export async function getByStudent(studentId, teacherScope, { limit = 100, offse
     const hasMore = rows.length > limitNum
     return { data: (hasMore ? rows.slice(0, limitNum) : rows).map(formatRecord), hasMore }
   }
-  const [rows] = await pool.execute(`
-    SELECT hr.* FROM hour_records hr
-    JOIN courses c ON JSON_CONTAINS(c.student_ids, JSON_QUOTE(hr.student_id))
-    WHERE hr.student_id = ? AND c.teacher_id = ?
-    ORDER BY hr.created_at DESC
-    LIMIT ${fetchCount} OFFSET ${offsetNum}
-  `, [studentId, teacherScope])
+
+  // 教师只能查看自己创建的学生 或 自己课程中的学生 或 管理员创建且未被占用的学生
+  const [students] = await pool.execute(
+    `SELECT id FROM students WHERE id = ? AND (
+      creator_id = ?
+      OR EXISTS (SELECT 1 FROM courses c WHERE JSON_CONTAINS(c.student_ids, JSON_QUOTE(students.id)) AND c.teacher_id = ?)
+      OR (created_by = 'admin' AND NOT EXISTS (SELECT 1 FROM courses c2 WHERE JSON_CONTAINS(c2.student_ids, JSON_QUOTE(students.id)) AND c2.teacher_id != ?))
+    )`,
+    [studentId, teacherScope, teacherScope, teacherScope]
+  )
+  if (students.length === 0) {
+    return { data: [], hasMore: false }
+  }
+
+  const [rows] = await pool.execute(
+    `SELECT * FROM hour_records WHERE student_id = ? ORDER BY created_at DESC LIMIT ${fetchCount} OFFSET ${offsetNum}`,
+    [studentId]
+  )
   const hasMore = rows.length > limitNum
   return { data: (hasMore ? rows.slice(0, limitNum) : rows).map(formatRecord), hasMore }
 }
 
 export async function create(data, teacherScope) {
   if (teacherScope) {
-    const [courses] = await pool.execute(
-      'SELECT id FROM courses WHERE teacher_id = ? AND JSON_CONTAINS(student_ids, JSON_QUOTE(?))',
-      [teacherScope, data.studentId]
+    const [students] = await pool.execute(
+      `SELECT id FROM students WHERE id = ? AND (
+        creator_id = ?
+        OR EXISTS (SELECT 1 FROM courses c WHERE JSON_CONTAINS(c.student_ids, JSON_QUOTE(students.id)) AND c.teacher_id = ?)
+        OR (created_by = 'admin' AND NOT EXISTS (SELECT 1 FROM courses c2 WHERE JSON_CONTAINS(c2.student_ids, JSON_QUOTE(students.id)) AND c2.teacher_id != ?))
+      )`,
+      [data.studentId, teacherScope, teacherScope, teacherScope]
     )
-    if (courses.length === 0) {
+    if (students.length === 0) {
       throw new Error('无权为该学生创建课时记录')
     }
   }

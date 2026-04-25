@@ -189,7 +189,7 @@
 
         <div class="backup-section">
           <h3>备份数据</h3>
-          <p class="backup-desc">将当前所有数据导出为 JSON 文件，保存到本地</p>
+          <p class="backup-desc">将当前所有数据导出为 SQL 文件，保存到本地</p>
           <button class="btn btn-primary" @click="handleBackup">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -202,9 +202,9 @@
         <div class="backup-divider"></div>
         <div class="backup-section">
           <h3>恢复数据</h3>
-          <p class="backup-desc">从备份文件恢复数据，将覆盖当前所有数据</p>
+          <p class="backup-desc">从 SQL 或 JSON 备份文件恢复数据，将覆盖当前所有数据</p>
           <div class="import-area">
-            <input type="file" ref="fileInput" accept=".json" @change="handleImport" style="display: none" />
+            <input type="file" ref="fileInput" accept=".sql,.json" @change="handleImport" style="display: none" />
             <button class="btn btn-secondary" @click="$refs.fileInput.click()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>

@@ -51,6 +51,24 @@ export const test = base.extend({
   adminPage: async ({ page }, use) => {
     const api = new ApiClient('http://localhost:3001')
     const loginData = await api.login('admin', 'admin123')
+
+    await page.route('**/edusystem/api/**', async (route) => {
+      const request = route.request()
+      if (request.method() === 'POST' || request.method() === 'PUT') {
+        const postData = request.postData()
+        if (postData) {
+          try {
+            const body = JSON.parse(postData)
+            body.isTest = true
+            await route.continue({ postData: JSON.stringify(body) })
+          } catch { await route.continue() }
+        } else { await route.continue() }
+      } else {
+        const response = await route.fetch()
+        await route.fulfill({ response })
+      }
+    })
+
     await page.goto('/login', { waitUntil: 'domcontentloaded' })
     await page.evaluate((tokens) => {
       localStorage.setItem('access_token', tokens.accessToken)
@@ -70,6 +88,23 @@ export const test = base.extend({
 
     const teacherApi = new ApiClient('http://localhost:3001')
     const loginData = await teacherApi.login(phone, '123456')
+
+    await page.route('**/edusystem/api/**', async (route) => {
+      const request = route.request()
+      if (request.method() === 'POST' || request.method() === 'PUT') {
+        const postData = request.postData()
+        if (postData) {
+          try {
+            const body = JSON.parse(postData)
+            body.isTest = true
+            await route.continue({ postData: JSON.stringify(body) })
+          } catch { await route.continue() }
+        } else { await route.continue() }
+      } else {
+        const response = await route.fetch()
+        await route.fulfill({ response })
+      }
+    })
 
     if (loginData.accessToken) {
       await page.goto('/login', { waitUntil: 'domcontentloaded' })

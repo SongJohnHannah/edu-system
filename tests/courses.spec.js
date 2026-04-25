@@ -29,7 +29,11 @@ test.describe('课程管理', () => {
     await adminPage.click('button:has-text("创建课程")')
     await adminPage.waitForTimeout(500)
     await adminPage.fill('.modal input[placeholder*="班"], .modal input[placeholder*="课程"]', name)
-    await adminPage.selectOption('.modal select', { index: 1 })
+    // Select teacher via SearchSelect
+    const teacherSelect = adminPage.locator('.modal .search-select').first()
+    await teacherSelect.locator('.ss-input').click()
+    await adminPage.waitForTimeout(300)
+    await adminPage.locator('.ss-option').first().click()
     await adminPage.waitForTimeout(500)
     await adminPage.click('.modal button:has-text("保存")')
     await adminPage.waitForTimeout(2000)

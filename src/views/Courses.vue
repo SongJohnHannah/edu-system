@@ -15,7 +15,14 @@
     </div>
 
     <div class="search-bar" v-if="courses.length > 0">
-      <input type="text" class="input" v-model="courseSearchText" placeholder="搜索课程名称..." />
+      <div class="search-row">
+        <SearchSelect
+          v-model="searchType"
+          :options="searchTypeOptions"
+          :searchable="false"
+        />
+        <input type="text" class="input" v-model="courseSearchText" :placeholder="'搜索' + searchTypeOptions.find(o => o.value === searchType)?.label + '...'" />
+      </div>
     </div>
 
     <div class="courses-list" v-if="filteredCourses.length > 0">
@@ -25,21 +32,23 @@
           <span class="course-time">{{ getWeekdayText(course.weekday) }} {{ course.startTime }}-{{ course.endTime }}</span>
         </div>
         <div class="course-details">
-          <div class="detail-item">
-            <span class="detail-label">授课教师</span>
-            <span class="detail-value">{{ getTeacherName(course.teacherId) }}</span>
+          <div class="detail-row">
+            <div class="detail-item">
+              <span class="detail-label">授课教师</span>
+              <span class="detail-value">{{ getTeacherName(course.teacherId) }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">每次课时</span>
+              <span class="detail-value">{{ course.hoursPerClass || 1 }} 课时</span>
+            </div>
+            <div class="detail-item" v-if="course.classroom">
+              <span class="detail-label">教室</span>
+              <span class="detail-value">{{ course.classroom }}</span>
+            </div>
           </div>
-          <div class="detail-item">
+          <div class="detail-item detail-students">
             <span class="detail-label">上课学生</span>
-            <span class="detail-value">{{ getStudentNames(course.studentIds) }}</span>
-          </div>
-          <div class="detail-item">
-            <span class="detail-label">每次课时</span>
-            <span class="detail-value">{{ course.hoursPerClass || 1 }} 课时</span>
-          </div>
-          <div class="detail-item" v-if="course.classroom">
-            <span class="detail-label">教室</span>
-            <span class="detail-value">{{ course.classroom }}</span>
+            <span class="detail-value students-value">{{ getStudentNames(course.studentIds) }}</span>
           </div>
         </div>
         <div class="course-actions">
@@ -64,31 +73,39 @@
           </div>
           <div class="form-group">
             <label>授课教师 *</label>
-            <select class="input" v-model="form.teacherId" required>
-              <option value="">请选择教师</option>
-              <option v-for="t in teachers" :key="t.id" :value="t.id">{{ t.name }}</option>
-            </select>
+            <SearchSelect
+              v-model="form.teacherId"
+              :options="teachers.map(t => ({ value: t.id, label: t.name }))"
+              placeholder="搜索或选择教师"
+            />
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>上课日期 *</label>
-              <select class="input" v-model="form.weekday" required>
-                <option :value="1">星期一</option>
-                <option :value="2">星期二</option>
-                <option :value="3">星期三</option>
-                <option :value="4">星期四</option>
-                <option :value="5">星期五</option>
-                <option :value="6">星期六</option>
-                <option :value="7">星期日</option>
-              </select>
-            </div>
+          <div class="form-group">
+            <label>上课日期 *</label>
+            <SearchSelect
+              v-model="form.weekday"
+              :options="weekdayOptions"
+              placeholder="选择星期"
+              :searchable="false"
+            />
+          </div>
+          <div class="time-row">
             <div class="form-group">
               <label>开始时间 *</label>
-              <input type="time" class="input" v-model="form.startTime" required />
+              <SearchSelect
+                v-model="form.startTime"
+                :options="timeOptions"
+                placeholder="选择开始时间"
+                :searchable="false"
+              />
             </div>
             <div class="form-group">
               <label>结束时间 *</label>
-              <input type="time" class="input" v-model="form.endTime" required />
+              <SearchSelect
+                v-model="form.endTime"
+                :options="timeOptions"
+                placeholder="选择结束时间"
+                :searchable="false"
+              />
             </div>
           </div>
           <div class="form-row">
@@ -138,6 +155,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getCourses, addCourse, updateCourse, deleteCourse, getTeachers, getStudents } from '../utils/storage'
 import { useToast } from '../composables/useToast'
+import SearchSelect from '../components/SearchSelect.vue'
 
 const toast = useToast()
 const courses = ref([])
@@ -147,6 +165,12 @@ const showModal = ref(false)
 const editingCourse = ref(null)
 const studentSearchText = ref('')
 const courseSearchText = ref('')
+const searchType = ref('course')
+const searchTypeOptions = [
+  { value: 'course', label: '课程名称' },
+  { value: 'teacher', label: '教师名称' },
+  { value: 'student', label: '学生名称' }
+]
 const showConfirmModal = ref(false)
 const deleteTargetId = ref('')
 const deleteTargetName = ref('')
@@ -195,16 +219,27 @@ const filteredStudents = computed(() => {
   )
 })
 
-// 过滤课程列表
 const filteredCourses = computed(() => {
   if (!courseSearchText.value) return courses.value
   const search = courseSearchText.value.toLowerCase()
-  return courses.value.filter(c =>
-    c.name.toLowerCase().includes(search)
-  )
+  return courses.value.filter(c => {
+    if (searchType.value === 'course') return c.name.toLowerCase().includes(search)
+    if (searchType.value === 'teacher') return getTeacherName(c.teacherId).toLowerCase().includes(search)
+    if (searchType.value === 'student') return getStudentNames(c.studentIds).toLowerCase().includes(search)
+    return false
+  })
 })
 
 const weekdayMap = { 1: '星期一', 2: '星期二', 3: '星期三', 4: '星期四', 5: '星期五', 6: '星期六', 7: '星期日' }
+const weekdayOptions = Object.entries(weekdayMap).map(([v, l]) => ({ value: Number(v), label: l }))
+
+const timeOptions = []
+for (let h = 6; h <= 22; h++) {
+  for (let m = 0; m < 60; m += 30) {
+    const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    timeOptions.push({ value: time, label: time })
+  }
+}
 
 function getWeekdayText(weekday) {
   return weekdayMap[weekday] || ''
@@ -340,9 +375,25 @@ function closeModal() {
   margin-bottom: 24px;
 }
 
-.search-bar .input {
-  width: 100%;
-  max-width: 300px;
+.search-row {
+  display: flex;
+  gap: 10px;
+  max-width: 400px;
+}
+
+.search-row .search-select {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.search-row .input {
+  flex: 1;
+}
+
+.courses-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
 }
 
 .courses-list {
@@ -354,59 +405,73 @@ function closeModal() {
 .course-card {
   background: white;
   border-radius: var(--radius-lg);
-  padding: 24px;
+  padding: 20px;
   box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
 }
 
 .course-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .course-name {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-text);
 }
 
 .course-time {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-primary);
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .course-details {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  padding: 16px 0;
+  padding: 12px 0;
   border-top: 1px solid var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-bg-secondary);
+}
+
+.detail-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 8px;
 }
 
 .detail-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .detail-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
 }
 
 .detail-value {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text);
   font-weight: 500;
+  white-space: nowrap;
+}
+
+.students-value {
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.5;
 }
 
 .course-actions {
-  margin-top: 16px;
+  margin-top: 12px;
   display: flex;
-  gap: 8px;
+  gap: 4px;
+  justify-content: flex-end;
 }
 
 .empty-state {
@@ -429,17 +494,21 @@ function closeModal() {
   bottom: 0;
   background: rgba(0, 0, 0, 0.5);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   z-index: 1000;
+  padding: 24px 16px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal {
   background: white;
   border-radius: var(--radius-lg);
-  padding: 32px;
+  padding: 24px;
   width: 100%;
   max-width: 560px;
+  margin: auto 0;
 }
 
 .modal-title {
@@ -462,12 +531,14 @@ function closeModal() {
 
 .form-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
 
-.form-row:last-of-type {
+.time-row {
+  display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 12px;
 }
 
 .student-select {
@@ -531,21 +602,42 @@ function closeModal() {
     flex-direction: column;
     gap: 4px;
   }
-  .course-details {
-    grid-template-columns: repeat(2, 1fr);
+  .courses-list {
+    grid-template-columns: 1fr;
+  }
+  .detail-row {
+    gap: 12px;
+  }
+  .search-row {
+    max-width: none;
+  }
+  .search-row .search-select {
+    width: 120px;
+    min-width: 0;
   }
   .form-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
-  .form-row:last-of-type {
-    grid-template-columns: 1fr;
+  .time-row {
+    grid-template-columns: 1fr 1fr;
   }
   .student-select {
-    flex-direction: column;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .student-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+  .modal-overlay {
+    padding: 0;
+    align-items: flex-end;
   }
   .modal {
-    margin: 16px;
-    padding: 24px;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 20px 16px;
   }
   .modal-actions {
     flex-direction: column;

@@ -33,6 +33,7 @@
           @mouseleave="hideTooltip"
         >
           <span class="day-number">{{ day.day }}</span>
+          <span class="course-dot" v-if="day.courses && day.courses.length > 0 && !day.hasAttendance"></span>
           <span class="attendance-dot" v-if="day.hasAttendance"></span>
           <span class="attendance-count" v-if="day.attendanceCount">{{ day.attendanceCount }}人</span>
         </div>
@@ -60,15 +61,30 @@
 
     <div class="attendance-detail" v-if="selectedDateInfo">
       <h3 class="detail-title">{{ selectedDateInfo.dateStr }}</h3>
-      <div class="detail-list" v-if="selectedDateInfo.records.length > 0">
-        <div class="detail-item" v-for="record in selectedDateInfo.records" :key="record.id">
-          <div class="detail-course">{{ getCourseName(record.courseId) }}</div>
-          <div class="detail-students">{{ getStudentNames(record.studentIds) }}</div>
-          <div class="detail-hours">扣除 {{ record.hoursDeducted }} 课时/人</div>
+      <!-- 课程安排 -->
+      <div v-if="selectedDateInfo.courses.length > 0">
+        <div class="detail-subtitle">课程安排</div>
+        <div class="detail-list">
+          <div class="detail-item course-item" v-for="course in selectedDateInfo.courses" :key="course.id">
+            <div class="detail-course">{{ course.name }}</div>
+            <div class="detail-teacher">{{ course.teacherName }}</div>
+            <div class="detail-time" v-if="course.startTime">{{ course.startTime }} - {{ course.endTime }}</div>
+          </div>
         </div>
       </div>
-      <div class="no-record" v-else>
-        <p>当日无点名记录</p>
+      <!-- 点名记录 -->
+      <div v-if="selectedDateInfo.records.length > 0" style="margin-top: 16px;">
+        <div class="detail-subtitle">点名记录</div>
+        <div class="detail-list">
+          <div class="detail-item" v-for="record in selectedDateInfo.records" :key="record.id">
+            <div class="detail-course">{{ getCourseName(record.courseId) }}</div>
+            <div class="detail-students">{{ getStudentNames(record.studentIds) }}</div>
+            <div class="detail-hours">扣除 {{ record.hoursDeducted }} 课时/人</div>
+          </div>
+        </div>
+      </div>
+      <div class="no-record" v-if="selectedDateInfo.courses.length === 0 && selectedDateInfo.records.length === 0">
+        <p>暂无安排</p>
       </div>
     </div>
   </div>
@@ -198,7 +214,8 @@ const selectedDateInfo = computed(() => {
   const att = attendanceMap.value.get(selectedDate.value)
   return {
     dateStr: selectedDate.value,
-    records: att?.records || attendanceRecords.value.filter(r => r.date === selectedDate.value)
+    records: att?.records || attendanceRecords.value.filter(r => r.date === selectedDate.value),
+    courses: getCoursesOnDate(selectedDate.value)
   }
 })
 
@@ -388,7 +405,21 @@ function hideTooltip() {
   right: 8px;
 }
 
+.course-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+
 .calendar-day.today .attendance-dot {
+  background: white;
+}
+
+.calendar-day.today .course-dot {
   background: white;
 }
 
@@ -474,6 +505,29 @@ function hideTooltip() {
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--color-bg-secondary);
+}
+
+.detail-subtitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.course-item {
+  border-left: 3px solid var(--color-success);
+}
+
+.detail-teacher {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+.detail-time {
+  font-size: 13px;
+  color: var(--color-primary);
+  margin-top: 2px;
 }
 
 .detail-list {

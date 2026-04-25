@@ -160,10 +160,11 @@
         </div>
         <div class="form-group">
           <label>交接给</label>
-          <select class="input" v-model="handoverTargetTeacherId">
-            <option value="">请选择教师</option>
-            <option v-for="t in teachers.filter(t => t.id !== handoverTeacher?.id)" :key="t.id" :value="t.id">{{ t.name }}</option>
-          </select>
+          <SearchSelect
+            v-model="handoverTargetTeacherId"
+            :options="teachers.filter(t => t.id !== handoverTeacher?.id).map(t => ({ value: t.id, label: t.name }))"
+            placeholder="请选择教师"
+          />
         </div>
         <div class="form-group">
           <label>交接原因（选填）</label>
@@ -187,6 +188,7 @@ import { getCourses } from '../utils/storage'
 import { performHandover } from '../utils/storage'
 import { api } from '../utils/api.js'
 import { useToast } from '../composables/useToast'
+import SearchSelect from '../components/SearchSelect.vue'
 
 const useApi = import.meta.env.VITE_USE_API === 'true'
 const isAdmin = ref(false)

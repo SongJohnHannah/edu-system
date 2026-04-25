@@ -77,12 +77,12 @@ export async function refreshAccessToken(refreshToken) {
   return { accessToken }
 }
 
-export async function createUser({ username, password, role, teacherId, displayName }) {
+export async function createUser({ username, password, role, teacherId, displayName, isTest }) {
   const id = generateId()
   const passwordHash = await bcrypt.hash(password, 10)
   await pool.execute(
-    'INSERT INTO users (id, username, password_hash, role, teacher_id, display_name) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, username, passwordHash, role || 'teacher', teacherId || null, displayName || username]
+    'INSERT INTO users (id, username, password_hash, role, teacher_id, display_name, is_test) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, username, passwordHash, role || 'teacher', teacherId || null, displayName || username, isTest ? 1 : 0]
   )
   return { id, username, role: role || 'teacher', displayName: displayName || username }
 }

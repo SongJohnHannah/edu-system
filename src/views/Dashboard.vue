@@ -54,7 +54,7 @@
     <div class="section">
       <h2 class="section-title">数据统计</h2>
       <div class="stats-grid">
-        <router-link to="/students" class="stat-card">
+        <router-link to="/calendar" class="stat-card">
           <div class="stat-icon students">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>

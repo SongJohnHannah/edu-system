@@ -60,7 +60,7 @@ app.use(`${API_PREFIX}/handovers`, verifyToken, handoverRoutes)
 // 清理测试数据（仅管理员）
 app.delete(`${API_PREFIX}/admin/test-data`, verifyToken, requireRole('admin'), async (req, res) => {
   const pool = (await import('./config/database.js')).default
-  const tables = ['attendance', 'hour_records', 'courses', 'students', 'teachers', 'course_handovers']
+  const tables = ['attendance', 'hour_records', 'courses', 'classes', 'students', 'course_handovers', 'teachers', 'users']
   const counts = {}
   for (const table of tables) {
     try {

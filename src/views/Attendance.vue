@@ -15,12 +15,20 @@
     <template v-else>
       <div class="select-course">
         <label>选择课程</label>
-        <select class="input" v-model="selectedCourseId" @change="loadCourseStudents">
-          <option value="">请选择课程</option>
-          <option v-for="course in courses" :key="course.id" :value="course.id">
-            {{ course.name }} - {{ getTeacherName(course.teacherId) }} ({{ getWeekdayText(course.weekday) }})
-          </option>
-        </select>
+        <div class="course-picker">
+          <SearchSelect
+            :modelValue="selectedWeekday"
+            @update:modelValue="v => { selectedWeekday = v; onWeekdayChange() }"
+            :options="weekdayList"
+            :searchable="false"
+          />
+          <SearchSelect
+            v-model="selectedCourseId"
+            :options="filteredCourses.map(c => ({ value: c.id, label: c.name, meta: getTeacherName(c.teacherId) }))"
+            placeholder="搜索或选择课程"
+            @update:modelValue="loadCourseStudents"
+          />
+        </div>
       </div>
 
       <div class="attendance-form" v-if="selectedCourse">
@@ -108,13 +116,31 @@
         <div class="history-header">
           <h3 class="history-title">点名记录</h3>
           <div class="filter-group">
-            <select class="input filter-select" v-model="filterCourseId">
-              <option value="">全部课程</option>
-              <option v-for="course in courses" :key="course.id" :value="course.id">
-                {{ course.name }}
-              </option>
-            </select>
-            <input type="month" class="input filter-select" v-model="filterMonth" />
+            <div class="filter-item">
+              <SearchSelect
+                v-model="filterCourseId"
+                :options="[{ value: '', label: '全部课程' }, ...courses.map(c => ({ value: c.id, label: c.name }))]"
+                placeholder="全部课程"
+                :searchable="true"
+              />
+            </div>
+            <div class="filter-item month-picker">
+              <button type="button" class="btn btn-secondary month-arrow" @click="changeMonth(-1)">‹</button>
+              <span class="month-label" @click="toggleMonthDropdown">{{ filterMonthLabel }}</span>
+              <button type="button" class="btn btn-secondary month-arrow" @click="changeMonth(1)">›</button>
+              <div class="month-dropdown" v-if="showMonthDropdown" @mousedown.prevent>
+                <div class="month-year-nav">
+                  <button type="button" class="month-arrow-sm" @click="monthDropdownYear--">‹</button>
+                  <span class="month-year-label">{{ monthDropdownYear }}年</span>
+                  <button type="button" class="month-arrow-sm" @click="monthDropdownYear++">›</button>
+                </div>
+                <div class="month-grid">
+                  <button v-for="m in 12" :key="m" type="button" class="month-cell"
+                    :class="{ active: filterMonth === `${monthDropdownYear}-${String(m).padStart(2, '0')}` }"
+                    @click="pickMonth(m)">{{ m }}月</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="history-list" v-if="filteredRecords.length > 0">
@@ -143,9 +169,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { getCourses, getStudents, getTeachers, getAttendance, getAttendancePage, addAttendance, deductHours, removeStudentsFromRecord } from '../utils/storage'
 import { useToast } from '../composables/useToast'
+import SearchSelect from '../components/SearchSelect.vue'
 
 const toast = useToast()
 const useApi = import.meta.env.VITE_USE_API === 'true'
@@ -169,9 +196,45 @@ const teachers = ref([])
 const attendanceRecords = ref([])
 const hasMoreRecords = ref(false)
 const selectedCourseId = ref('')
+const todayWeekday = new Date().getDay() || 7
+const selectedWeekday = ref(todayWeekday)
+const weekdayList = [
+  { value: 1, label: '周一' }, { value: 2, label: '周二' }, { value: 3, label: '周三' },
+  { value: 4, label: '周四' }, { value: 5, label: '周五' }, { value: 6, label: '周六' },
+  { value: 7, label: '周日' }
+]
 const filterCourseId = ref('')
 const nowDate = new Date()
 const filterMonth = ref(`${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}`)
+const showMonthDropdown = ref(false)
+const monthDropdownYear = ref(nowDate.getFullYear())
+
+const filterMonthLabel = computed(() => {
+  if (!filterMonth.value) return '选择月份'
+  const [y, m] = filterMonth.value.split('-')
+  return `${y}年${parseInt(m)}月`
+})
+
+function changeMonth(delta) {
+  const [y, m] = filterMonth.value.split('-').map(Number)
+  const d = new Date(y, m - 1 + delta, 1)
+  filterMonth.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function toggleMonthDropdown() {
+  if (showMonthDropdown.value) {
+    showMonthDropdown.value = false
+    return
+  }
+  const [y] = filterMonth.value.split('-').map(Number)
+  monthDropdownYear.value = y
+  showMonthDropdown.value = true
+}
+
+function pickMonth(m) {
+  filterMonth.value = `${monthDropdownYear.value}-${String(m).padStart(2, '0')}`
+  showMonthDropdown.value = false
+}
 const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
@@ -214,7 +277,6 @@ async function loadData() {
 
 onMounted(async () => {
   await loadData()
-  // 页面可见性变化时刷新数据（处理移交后数据过期问题）
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -240,6 +302,16 @@ async function loadMoreRecords() {
 const selectedCourse = computed(() => {
   return courses.value.find(c => c.id === selectedCourseId.value)
 })
+
+const filteredCourses = computed(() => {
+  return courses.value.filter(c => c.weekday === selectedWeekday.value)
+})
+
+function onWeekdayChange() {
+  selectedCourseId.value = ''
+  courseStudents.value = []
+  checkedStudents.value = []
+}
 
 const filteredRecords = computed(() => {
   let result = attendanceRecords.value
@@ -435,14 +507,25 @@ async function confirmDeleteStudents() {
   padding: 24px;
   margin-bottom: 24px;
   box-shadow: var(--shadow-sm);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
 }
 
 .select-course label {
-  display: block;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 18px;
+  font-weight: 600;
   color: var(--color-text);
-  margin-bottom: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.course-picker {
+  display: flex;
+  gap: 10px;
+  max-width: 480px;
+  width: 100%;
 }
 
 .attendance-form {
@@ -584,7 +667,115 @@ async function confirmDeleteStudents() {
 
 .filter-group {
   display: flex;
-  gap: 12px;
+  gap: 10px;
+  max-width: 480px;
+  width: 100%;
+}
+
+.filter-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.month-picker {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: white;
+  padding: 0 4px;
+}
+
+.month-arrow {
+  padding: 4px 8px;
+  font-size: 18px;
+  line-height: 1;
+  min-width: 32px;
+  flex-shrink: 0;
+}
+
+.month-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: center;
+  flex: 1;
+  white-space: nowrap;
+}
+
+.month-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  padding: 8px;
+}
+
+.month-year-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--color-bg-secondary);
+  margin-bottom: 8px;
+}
+
+.month-arrow-sm {
+  background: none;
+  border: none;
+  font-size: 16px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+
+.month-arrow-sm:hover {
+  color: var(--color-primary);
+}
+
+.month-year-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  min-width: 60px;
+  text-align: center;
+}
+
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.month-cell {
+  padding: 8px 4px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  font-size: 13px;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s;
+}
+
+.month-cell:hover {
+  background: var(--color-bg-secondary);
+}
+
+.month-cell.active {
+  background: var(--color-primary);
+  color: white;
 }
 
 .filter-select {
@@ -763,6 +954,20 @@ async function confirmDeleteStudents() {
 }
 
 @media (max-width: 768px) {
+  .select-course {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .select-course label {
+    font-size: 18px;
+    font-weight: 600;
+    text-align: center;
+  }
+  .course-picker {
+    gap: 6px;
+    max-width: none;
+  }
   .modal {
     margin: 16px;
     padding: 24px;
@@ -775,11 +980,29 @@ async function confirmDeleteStudents() {
   }
   .history-header {
     flex-direction: column;
+    align-items: center;
     gap: 8px;
   }
   .filter-group {
-    flex-wrap: wrap;
-    gap: 8px;
+    flex-wrap: nowrap;
+    gap: 6px;
+    width: 100%;
+    max-width: none;
+  }
+  .filter-item {
+    flex: 1;
+    min-width: 0;
+  }
+  .month-picker {
+    padding: 0 2px;
+  }
+  .month-arrow {
+    padding: 4px 6px;
+    font-size: 16px;
+    min-width: 28px;
+  }
+  .month-label {
+    font-size: 12px;
   }
   .form-header {
     flex-direction: column;

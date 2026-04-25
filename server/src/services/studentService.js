@@ -159,6 +159,24 @@ export async function addHours(id, hours, remark, operator) {
   return rows[0] ? formatStudent(rows[0]) : null
 }
 
+export async function subtractHours(id, hours, remark, operator) {
+  const [students] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
+  if (students.length === 0) throw new Error('学生不存在')
+  const student = students[0]
+  const remaining = student.total_hours - (student.used_hours || 0)
+  if (hours > remaining) {
+    throw new Error(`减课时数不能超过剩余课时（当前剩余 ${remaining} 课时）`)
+  }
+  await pool.execute('UPDATE students SET total_hours = total_hours - ? WHERE id = ?', [hours, id])
+  const recordId = generateId()
+  await pool.execute(
+    'INSERT INTO hour_records (id, student_id, type, hours, remark, operator) VALUES (?, ?, ?, ?, ?, ?)',
+    [recordId, id, 'subtract', hours, remark || '手动减少', operator || 'manual']
+  )
+  const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
+  return rows[0] ? formatStudent(rows[0]) : null
+}
+
 export async function addBatch(studentList, defaultHours, createdBy = 'admin', creatorId = null) {
   let addedCount = 0
   const skipped = []

@@ -86,4 +86,40 @@ test.describe('点名管理', () => {
     await adminPage.waitForLoadState('networkidle')
     expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED'))).toHaveLength(0)
   })
+
+  test('点名分页 — hasMore 和 offset 参数正确', async () => {
+    // 先创建足够多的点名记录
+    for (let i = 0; i < 3; i++) {
+      await api.post('/attendance', {
+        courseId,
+        date: new Date().toISOString().slice(0, 10),
+        studentIds: [studentIds[0]],
+        hoursDeducted: 1,
+      })
+    }
+
+    // 第一页 limit=2，应有 hasMore=true
+    const res1 = await api.get('/attendance?limit=2&offset=0')
+    const body1 = await res1.json()
+    const page1 = Array.isArray(body1) ? { data: body1, hasMore: false } : body1
+    expect(page1.data.length).toBeLessThanOrEqual(2)
+
+    // 总记录应该 >= 3（刚创建的），所以 limit=2 时 hasMore 应为 true
+    if (page1.data.length >= 2) {
+      expect(page1.hasMore).toBe(true)
+    }
+
+    // 第二页 offset=2
+    const res2 = await api.get('/attendance?limit=2&offset=2')
+    const body2 = await res2.json()
+    const page2 = Array.isArray(body2) ? { data: body2, hasMore: false } : body2
+    expect(page2.data.length).toBeLessThanOrEqual(2)
+
+    // 两页数据不应重复
+    if (page1.data.length > 0 && page2.data.length > 0) {
+      const ids1 = new Set(page1.data.map(r => r.id))
+      const overlap = page2.data.filter(r => ids1.has(r.id))
+      expect(overlap.length).toBe(0)
+    }
+  })
 })
