@@ -5,8 +5,8 @@ import { formatDateTime } from '../utils/dateFormat.js'
 function formatStudent(row) {
   return {
     ...row,
-    totalHours: row.total_hours,
-    usedHours: row.used_hours,
+    totalHours: Number(row.total_hours),
+    usedHours: Number(row.used_hours),
     classId: row.class_id,
     createdBy: row.created_by,
     creatorId: row.creator_id,
@@ -76,23 +76,33 @@ export async function verifyAccess(id, teacherScope) {
 }
 
 export async function create(data) {
-  const [dup] = await pool.execute('SELECT id FROM students WHERE name = ?', [data.name])
-  if (dup.length > 0) throw new Error('学生姓名已存在')
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    const [dup] = await conn.execute('SELECT id FROM students WHERE name = ? FOR UPDATE', [data.name])
+    if (dup.length > 0) throw new Error('学生姓名已存在')
 
-  if (data.phone) {
-    const [phoneDup] = await pool.execute('SELECT id FROM students WHERE phone = ? AND phone != ""', [data.phone])
-    if (phoneDup.length > 0) throw new Error('该手机号已被其他学生使用')
+    if (data.phone) {
+      const [phoneDup] = await conn.execute('SELECT id FROM students WHERE phone = ? AND phone != "" FOR UPDATE', [data.phone])
+      if (phoneDup.length > 0) throw new Error('该手机号已被其他学生使用')
+    }
+
+    const id = generateId()
+    await conn.execute(
+      `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
+      [id, data.name, data.phone || '', data.age || null, data.remark || '', data.totalHours || 0, data.classId || '',
+       data.createdBy || 'admin', data.creatorId || null, data.isTest ? 1 : 0]
+    )
+    await conn.commit()
+    const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
+    return formatStudent(rows[0])
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
   }
-
-  const id = generateId()
-  await pool.execute(
-    `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
-     VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
-    [id, data.name, data.phone || '', data.age || null, data.remark || '', data.totalHours || 0, data.classId || '',
-     data.createdBy || 'admin', data.creatorId || null, data.isTest ? 1 : 0]
-  )
-  const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-  return formatStudent(rows[0])
 }
 
 export async function update(id, data) {
@@ -130,24 +140,34 @@ export async function update(id, data) {
 }
 
 export async function remove(id) {
-  await pool.execute('DELETE FROM hour_records WHERE student_id = ?', [id])
-  const [records] = await pool.execute('SELECT id, student_ids FROM attendance WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
-  for (const r of records) {
-    const ids = typeof r.student_ids === 'string' ? JSON.parse(r.student_ids) : (r.student_ids || [])
-    const remaining = ids.filter(sid => sid !== id)
-    if (remaining.length === 0) {
-      await pool.execute('DELETE FROM attendance WHERE id = ?', [r.id])
-    } else {
-      await pool.execute('UPDATE attendance SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), r.id])
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    await conn.execute('DELETE FROM hour_records WHERE student_id = ?', [id])
+    const [records] = await conn.execute('SELECT id, student_ids FROM attendance WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
+    for (const r of records) {
+      const ids = typeof r.student_ids === 'string' ? JSON.parse(r.student_ids) : (r.student_ids || [])
+      const remaining = ids.filter(sid => sid !== id)
+      if (remaining.length === 0) {
+        await conn.execute('DELETE FROM attendance WHERE id = ?', [r.id])
+      } else {
+        await conn.execute('UPDATE attendance SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), r.id])
+      }
     }
+    const [courses] = await conn.execute('SELECT id, student_ids FROM courses WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
+    for (const c of courses) {
+      const ids = typeof c.student_ids === 'string' ? JSON.parse(c.student_ids) : (c.student_ids || [])
+      const remaining = ids.filter(sid => sid !== id)
+      await conn.execute('UPDATE courses SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), c.id])
+    }
+    await conn.execute('DELETE FROM students WHERE id = ?', [id])
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
   }
-  const [courses] = await pool.execute('SELECT id, student_ids FROM courses WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
-  for (const c of courses) {
-    const ids = typeof c.student_ids === 'string' ? JSON.parse(c.student_ids) : (c.student_ids || [])
-    const remaining = ids.filter(sid => sid !== id)
-    await pool.execute('UPDATE courses SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), c.id])
-  }
-  await pool.execute('DELETE FROM students WHERE id = ?', [id])
 }
 
 export async function checkNameExists(name, excludeId) {
@@ -187,16 +207,16 @@ export async function addHours(id, hours, remark, operator) {
 }
 
 export async function subtractHours(id, hours, remark, operator) {
-  const [students] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-  if (students.length === 0) throw new Error('学生不存在')
-  const student = students[0]
-  const remaining = student.total_hours - (student.used_hours || 0)
-  if (hours > remaining) {
-    throw new Error(`减课时数不能超过剩余课时（当前剩余 ${remaining} 课时）`)
-  }
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    const [students] = await conn.execute('SELECT * FROM students WHERE id = ? FOR UPDATE', [id])
+    if (students.length === 0) throw new Error('学生不存在')
+    const student = students[0]
+    const remaining = student.total_hours - (student.used_hours || 0)
+    if (hours > remaining) {
+      throw new Error(`减课时数不能超过剩余课时（当前剩余 ${remaining} 课时）`)
+    }
     await conn.execute('UPDATE students SET total_hours = total_hours - ? WHERE id = ?', [hours, id])
     const recordId = generateId()
     await conn.execute(

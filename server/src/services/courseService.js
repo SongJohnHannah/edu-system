@@ -8,7 +8,7 @@ function formatCourse(row) {
     teacherId: row.teacher_id,
     startTime: row.start_time,
     endTime: row.end_time,
-    hoursPerClass: row.hours_per_class,
+    hoursPerClass: Number(row.hours_per_class),
     studentIds: typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : (row.student_ids || []),
     isTest: !!row.is_test,
     createdAt: formatDateTime(row.created_at),
@@ -80,6 +80,29 @@ export async function update(id, data) {
 }
 
 export async function remove(id) {
-  await pool.execute('DELETE FROM attendance WHERE course_id = ?', [id])
-  await pool.execute('DELETE FROM courses WHERE id = ?', [id])
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    // 还原被扣课时
+    const [records] = await conn.execute('SELECT student_ids, hours_deducted FROM attendance WHERE course_id = ?', [id])
+    for (const r of records) {
+      const studentIds = typeof r.student_ids === 'string' ? JSON.parse(r.student_ids) : (r.student_ids || [])
+      if (studentIds.length > 0) {
+        const placeholders = studentIds.map(() => '?').join(',')
+        await conn.execute(
+          `UPDATE students SET used_hours = GREATEST(0, used_hours - ?) WHERE id IN (${placeholders})`,
+          [r.hours_deducted, ...studentIds]
+        )
+      }
+    }
+    await conn.execute('DELETE FROM hour_records WHERE related_id IN (SELECT id FROM attendance WHERE course_id = ?)', [id])
+    await conn.execute('DELETE FROM attendance WHERE course_id = ?', [id])
+    await conn.execute('DELETE FROM courses WHERE id = ?', [id])
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
 }

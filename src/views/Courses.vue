@@ -21,7 +21,7 @@
           :options="searchTypeOptions"
           :searchable="false"
         />
-        <input type="text" class="input" v-model="courseSearchText" :placeholder="'搜索' + searchTypeOptions.find(o => o.value === searchType)?.label + '...'" />
+        <input type="text" class="input" v-model="courseSearchText" :placeholder="'搜索' + (searchTypeOptions.find(o => o.value === searchType)?.label || '') + '...'" />
       </div>
     </div>
 
@@ -29,7 +29,7 @@
       <div class="course-card" v-for="course in filteredCourses" :key="course.id">
         <div class="course-header">
           <h3 class="course-name">{{ course.name }}</h3>
-          <span class="course-time">{{ getWeekdayText(course.weekday) }} {{ course.startTime }}-{{ course.endTime }}</span>
+          <span class="course-time">{{ getWeekdayText(course.weekday) }} {{ course.startTime || '' }}-{{ course.endTime || '' }}</span>
         </div>
         <div class="course-details">
           <div class="detail-row">
@@ -39,7 +39,7 @@
             </div>
             <div class="detail-item">
               <span class="detail-label">每次课时</span>
-              <span class="detail-value">{{ course.hoursPerClass || 1 }} 课时</span>
+              <span class="detail-value">{{ course.hoursPerClass ?? 1 }} 课时</span>
             </div>
             <div class="detail-item" v-if="course.classroom">
               <span class="detail-label">教室</span>
@@ -111,7 +111,7 @@
           <div class="form-row">
             <div class="form-group">
               <label>每次课时</label>
-              <input type="number" class="input" v-model.number="form.hoursPerClass" min="1" />
+              <input type="number" class="input" v-model.number="form.hoursPerClass" min="0.5" step="0.5" />
             </div>
             <div class="form-group">
               <label>教室</label>
@@ -251,7 +251,7 @@ function getTeacherName(teacherId) {
 }
 
 function getStudentNames(studentIds) {
-  return studentIds.map(id => {
+  return (studentIds || []).map(id => {
     const student = students.value.find(s => s.id === id)
     return student ? student.name : ''
   }).filter(Boolean).join('、') || '无'
@@ -268,7 +268,7 @@ function toggleStudent(id) {
 
 function editCourse(course) {
   editingCourse.value = course
-  form.value = { ...course, studentIds: [...course.studentIds] }
+  form.value = { ...course, studentIds: [...(course.studentIds || [])] }
   showModal.value = true
 }
 
@@ -284,6 +284,11 @@ async function saveCourse() {
   const hpc = Number(form.value.hoursPerClass)
   if (!hpc || hpc <= 0) {
     form.value.hoursPerClass = 1
+  } else if (hpc % 0.5 !== 0) {
+    form.value.hoursPerClass = Math.round(hpc * 2) / 2
+  }
+  if (form.value.hoursPerClass < 0.5) {
+    form.value.hoursPerClass = 0.5
   }
 
   submitting.value = true

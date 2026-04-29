@@ -1,10 +1,10 @@
 import pool from '../config/database.js'
 
 export async function getTeacherStats(startDate, endDate, teacherScope) {
-  let teacherQuery = 'SELECT id, name, phone, subject FROM teachers'
+  let teacherQuery = "SELECT id, name, phone, subject FROM teachers WHERE status != 'deleted'"
   let teacherParams = []
   if (teacherScope) {
-    teacherQuery += ' WHERE id = ?'
+    teacherQuery += ' AND id = ?'
     teacherParams = [teacherScope]
   }
   const [teachers] = await pool.execute(teacherQuery, teacherParams)
@@ -48,7 +48,7 @@ export async function getTeacherStats(startDate, endDate, teacherScope) {
     courseCount: courseMap.get(teacher.id)?.course_count || 0,
     studentCount: courseMap.get(teacher.id)?.student_count || 0,
     attendanceCount: attMap.get(teacher.id)?.attendance_count || 0,
-    consumedHours: attMap.get(teacher.id)?.consumed_hours || 0
+    consumedHours: Number(attMap.get(teacher.id)?.consumed_hours || 0)
   }))
 }
 
@@ -76,14 +76,14 @@ export async function getOverallStats(startDate, endDate, teacherScope) {
   let courseParams = []
 
   if (teacherScope) {
-    teacherWhere = ' WHERE id = ?'
+    teacherWhere = ' WHERE id = ? AND status != ?'
     courseFilter = ' AND c.teacher_id = ?'
     courseParams = [teacherScope]
   }
 
   const [[{ totalTeachers }]] = await pool.execute(
-    `SELECT COUNT(*) AS totalTeachers FROM teachers${teacherWhere}`,
-    teacherScope ? [teacherScope] : []
+    `SELECT COUNT(*) AS totalTeachers FROM teachers${teacherScope ? ' WHERE id = ? AND status != ?' : " WHERE status != 'deleted'"}`,
+    teacherScope ? [teacherScope, 'deleted'] : []
   )
 
   // Course count (by current ownership)
@@ -109,6 +109,6 @@ export async function getOverallStats(startDate, endDate, teacherScope) {
     activeTeachers: stats[0].activeTeachers || 0,
     totalCourses: totalCourses || 0,
     totalAttendance: stats[0].totalAttendance || 0,
-    totalConsumedHours: stats[0].totalConsumedHours || 0
+    totalConsumedHours: Number(stats[0].totalConsumedHours || 0)
   }
 }

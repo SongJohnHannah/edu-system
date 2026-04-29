@@ -2,13 +2,13 @@ import pool from '../config/database.js'
 import { formatDate, formatDateTime } from '../utils/dateFormat.js'
 
 function formatStudent(row) {
-  return { ...row, totalHours: row.total_hours, usedHours: row.used_hours, classId: row.class_id, createdBy: row.created_by, creatorId: row.creator_id, isTest: !!row.is_test, createdAt: formatDateTime(row.created_at), updatedAt: formatDateTime(row.updated_at) }
+  return { ...row, totalHours: Number(row.total_hours), usedHours: Number(row.used_hours), classId: row.class_id, createdBy: row.created_by, creatorId: row.creator_id, isTest: !!row.is_test, createdAt: formatDateTime(row.created_at), updatedAt: formatDateTime(row.updated_at) }
 }
 function formatTeacher(row) {
   return { ...row, isTest: !!row.is_test, createdAt: formatDateTime(row.created_at), updatedAt: formatDateTime(row.updated_at) }
 }
 function formatCourse(row) {
-  return { ...row, teacherId: row.teacher_id, startTime: row.start_time, endTime: row.end_time, hoursPerClass: row.hours_per_class, studentIds: typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : (row.student_ids || []), isTest: !!row.is_test, createdAt: formatDateTime(row.created_at), updatedAt: formatDateTime(row.updated_at) }
+  return { ...row, teacherId: row.teacher_id, startTime: row.start_time, endTime: row.end_time, hoursPerClass: Number(row.hours_per_class), studentIds: typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : (row.student_ids || []), isTest: !!row.is_test, createdAt: formatDateTime(row.created_at), updatedAt: formatDateTime(row.updated_at) }
 }
 
 export async function exportData() {
@@ -33,7 +33,7 @@ export async function exportData() {
         date: formatDate(a.date),
         courseId: a.course_id,
         studentIds: typeof a.student_ids === 'string' ? JSON.parse(a.student_ids) : (a.student_ids || []),
-        hoursDeducted: a.hours_deducted,
+        hoursDeducted: Number(a.hours_deducted),
         recordedBy: a.recorded_by,
         isTest: !!a.is_test,
         createdAt: formatDateTime(a.created_at)

@@ -48,7 +48,7 @@
             <td>{{ student.phone || '-' }}</td>
             <td>{{ student.totalHours }}</td>
             <td>{{ student.usedHours || 0 }}</td>
-            <td>{{ student.totalHours - (student.usedHours || 0) }}</td>
+            <td>{{ (student.totalHours || 0) - (student.usedHours || 0) }}</td>
             <td>
               <div class="status-badges">
                 <span class="badge" :class="getStudentStatusClass(student)" @click="openStatusMenu(student)">
@@ -88,7 +88,7 @@
         <div class="mobile-card-sticky">
           <strong class="mobile-name" @click="showNameTip(student, $event)">{{ student.name }}</strong>
           <div class="mobile-right-info">
-            <span class="mobile-remaining" :class="getHoursStatusClass(student)">{{ student.totalHours - (student.usedHours || 0) }} 课时</span>
+            <span class="mobile-remaining" :class="getHoursStatusClass(student)">{{ (student.totalHours || 0) - (student.usedHours || 0) }} 课时</span>
             <span class="badge mobile-status-badge" :class="getStudentStatusClass(student)" @click="openStatusMenu(student)">
               {{ getStudentStatusText(student) }}
             </span>
@@ -140,6 +140,7 @@
               v-model.number="form.totalHours"
               :required="!editingStudent"
               min="0"
+              step="0.5"
               placeholder="请输入购买课时数"
               :disabled="!!editingStudent"
             />
@@ -179,7 +180,7 @@
           <div class="batch-options">
             <div class="form-group">
               <label>默认课时</label>
-              <input type="number" class="input" v-model.number="batchDefaultHours" min="0" placeholder="默认0课时" />
+              <input type="number" class="input" v-model.number="batchDefaultHours" min="0" step="0.5" placeholder="默认0课时" />
             </div>
           </div>
         </div>
@@ -216,7 +217,7 @@
           </div>
           <div class="info-row">
             <span class="info-label">当前剩余</span>
-            <span class="info-value">{{ hoursStudent ? hoursStudent.totalHours - (hoursStudent.usedHours || 0) : 0 }} 课时</span>
+            <span class="info-value">{{ hoursStudent ? (hoursStudent.totalHours || 0) - (hoursStudent.usedHours || 0) : 0 }} 课时</span>
           </div>
         </div>
         <form @submit.prevent="saveAddHours">
@@ -235,8 +236,8 @@
           </div>
           <div class="form-group">
             <label>{{ addHoursForm.type === 'add' ? '增加课时数' : '减少课时数' }} *</label>
-            <input type="number" class="input" v-model.number="addHoursForm.hours" required min="1" :max="addHoursForm.type === 'subtract' ? (hoursStudent ? hoursStudent.totalHours - (hoursStudent.usedHours || 0) : 1) : undefined" :placeholder="addHoursForm.type === 'add' ? '请输入要增加的课时数' : '请输入要减少的课时数'" />
-            <span class="form-hint" v-if="addHoursForm.type === 'subtract' && hoursStudent">最多可减少 {{ hoursStudent.totalHours - (hoursStudent.usedHours || 0) }} 课时</span>
+            <input type="number" class="input" v-model.number="addHoursForm.hours" required min="0.5" step="0.5" :max="addHoursForm.type === 'subtract' ? (hoursStudent ? (hoursStudent.totalHours || 0) - (hoursStudent.usedHours || 0) : 0.5) : undefined" :placeholder="addHoursForm.type === 'add' ? '请输入要增加的课时数' : '请输入要减少的课时数'" />
+            <span class="form-hint" v-if="addHoursForm.type === 'subtract' && hoursStudent">最多可减少 {{ (hoursStudent.totalHours || 0) - (hoursStudent.usedHours || 0) }} 课时</span>
           </div>
           <div class="form-group">
             <label>备注</label>
@@ -356,14 +357,14 @@ const filteredStudents = computed(() => {
     const search = searchText.value.toLowerCase()
     result = result.filter(s =>
       s.name.toLowerCase().includes(search) ||
-      s.phone.includes(search)
+      (s.phone || '').includes(search)
     )
   }
 
   // 按剩余课时排序
   const sorted = result.slice().sort((a, b) => {
-    const remainingA = a.totalHours - (a.usedHours || 0)
-    const remainingB = b.totalHours - (b.usedHours || 0)
+    const remainingA = (a.totalHours || 0) - (a.usedHours || 0)
+    const remainingB = (b.totalHours || 0) - (b.usedHours || 0)
     return sortOrder.value === 'asc' ? remainingA - remainingB : remainingB - remainingA
   })
   return sorted
@@ -390,14 +391,14 @@ function getStudentStatusText(student) {
 
 // 课时状态（自动计算）
 function getHoursStatusClass(student) {
-  const remaining = student.totalHours - (student.usedHours || 0)
+  const remaining = (student.totalHours || 0) - (student.usedHours || 0)
   if (remaining <= 0) return 'badge-danger'
   if (remaining < 3) return 'badge-warning'
   return 'badge-success'
 }
 
 function getHoursStatusText(student) {
-  const remaining = student.totalHours - (student.usedHours || 0)
+  const remaining = (student.totalHours || 0) - (student.usedHours || 0)
   if (remaining <= 0) return '已耗尽'
   if (remaining < 3) return '不足'
   return '正常'
@@ -444,7 +445,7 @@ async function saveStudent() {
 function removeStudent(student) {
   if (student.status === 'deleted') return
 
-  const remaining = student.totalHours - (student.usedHours || 0)
+  const remaining = (student.totalHours || 0) - (student.usedHours || 0)
   const warning = remaining > 0
     ? `该学生还有 ${remaining} 节剩余课时！\n`
     : ''
@@ -546,6 +547,8 @@ function closeHoursModal() {
 
 async function saveAddHours() {
   if (!hoursStudent.value || addHoursForm.value.hours <= 0 || submitting.value) return
+  const h = Number(addHoursForm.value.hours)
+  addHoursForm.value.hours = h % 0.5 !== 0 ? Math.round(h * 2) / 2 : h
 
   submitting.value = true
   try {
@@ -700,6 +703,7 @@ function goToHistory(studentId) {
   color: var(--color-text);
   line-height: 1.6;
   margin-bottom: 0;
+  white-space: pre-line;
 }
 
 .status-badges {

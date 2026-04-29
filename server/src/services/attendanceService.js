@@ -8,7 +8,7 @@ function formatAttendance(row) {
     date: formatDate(row.date),
     courseId: row.course_id,
     studentIds: typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : (row.student_ids || []),
-    hoursDeducted: row.hours_deducted,
+    hoursDeducted: Number(row.hours_deducted),
     recordedBy: row.recorded_by,
     isTest: !!row.is_test,
     createdAt: formatDateTime(row.created_at)
@@ -108,7 +108,7 @@ export async function remove(attendanceId, teacherScope) {
     const studentIds = typeof record.student_ids === 'string' ? JSON.parse(record.student_ids) : (record.student_ids || [])
 
     if (teacherScope) {
-      if (record.recorded_by && record.recorded_by !== teacherScope) {
+      if (!record.recorded_by || record.recorded_by !== teacherScope) {
         throw new Error('只能删除自己创建的点名记录')
       }
     }
@@ -150,23 +150,24 @@ export async function removeStudents(attendanceId, studentIdsToRemove, teacherSc
     const currentStudentIds = typeof record.student_ids === 'string' ? JSON.parse(record.student_ids) : (record.student_ids || [])
 
     if (teacherScope) {
-      if (record.recorded_by && record.recorded_by !== teacherScope) {
+      if (!record.recorded_by || record.recorded_by !== teacherScope) {
         throw new Error('只能删除自己创建的点名记录')
       }
     }
 
     const removeSet = new Set(studentIdsToRemove)
+    const validIds = studentIdsToRemove.filter(id => currentStudentIds.includes(id))
+    if (validIds.length === 0) throw new Error('要移除的学生不在该点名记录中')
     const remainingIds = currentStudentIds.filter(id => !removeSet.has(id))
 
-    // Batch restore hours
-    const placeholders = studentIdsToRemove.map(() => '?').join(',')
+    // Only restore hours for students actually in the record
+    const placeholders = validIds.map(() => '?').join(',')
     await conn.execute(
       `UPDATE students SET used_hours = GREATEST(0, used_hours - ?) WHERE id IN (${placeholders})`,
-      [record.hours_deducted, ...studentIdsToRemove]
+      [record.hours_deducted, ...validIds]
     )
 
-    // Batch insert restore records (parameterized)
-    for (const sid of studentIdsToRemove) {
+    for (const sid of validIds) {
       await conn.execute(
         'INSERT INTO hour_records (id, student_id, type, hours, remark, related_id, operator) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [generateId(), sid, 'restore', record.hours_deducted, '删除点名记录还原', attendanceId, 'restore']
