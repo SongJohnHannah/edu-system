@@ -145,7 +145,7 @@
       <div class="warning-list">
         <div class="warning-item" v-for="student in lowHoursStudents" :key="student.id">
           <span class="warning-name">{{ student.name }}</span>
-          <span class="warning-hours">剩余 {{ student.totalHours - student.usedHours }} 课时</span>
+          <span class="warning-hours" :class="{ 'hours-negative': (student.totalHours || 0) - (student.usedHours || 0) < 0 }">{{ formatRemaining(student) }}</span>
         </div>
       </div>
     </div>
@@ -213,7 +213,7 @@ const todayCourseCount = computed(() => {
 // 今日已消耗课时
 const todayUsedHours = computed(() => {
   const todayRecords = attendance.value.filter(r => r.date === todayStr)
-  return todayRecords.reduce((sum, r) => sum + (r.hoursDeducted || 1) * (r.studentIds?.length || 0), 0)
+  return todayRecords.reduce((sum, r) => sum + (r.hoursDeducted ?? 1) * ((r.studentIds || []).length), 0)
 })
 
 // 今日点名次数
@@ -224,13 +224,23 @@ const todayAttendanceCount = computed(() => {
 // 本月点名次数
 const thisMonthAttendanceCount = computed(() => {
   const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
-  return attendance.value.filter(r => r.date.startsWith(thisMonth)).length
+  return attendance.value.filter(r => r.date && r.date.startsWith(thisMonth)).length
 })
 
 // 课时预警学生
 const lowHoursStudents = computed(() => {
-  return students.value.filter(s => (s.totalHours - (s.usedHours || 0)) < 3 && (s.totalHours - (s.usedHours || 0)) > 0)
+  return students.value
+    .filter(s => {
+      const r = (s.totalHours || 0) - (s.usedHours || 0)
+      return r < 3
+    })
+    .sort((a, b) => ((a.totalHours || 0) - (a.usedHours || 0)) - ((b.totalHours || 0) - (b.usedHours || 0)))
 })
+
+function formatRemaining(student) {
+  const r = (student.totalHours || 0) - (student.usedHours || 0)
+  return r < 0 ? `欠 ${Math.abs(r)} 课时` : `剩余 ${r} 课时`
+}
 </script>
 
 <style scoped>
@@ -391,6 +401,11 @@ const lowHoursStudents = computed(() => {
 .warning-hours {
   color: var(--color-warning);
   font-weight: 500;
+}
+
+.warning-hours.hours-negative {
+  color: var(--color-danger);
+  font-weight: 700;
 }
 
 @media (max-width: 768px) {

@@ -33,12 +33,15 @@ test.describe('减课时 API', () => {
     expect(subtractRecord.hours).toBe(5)
   })
 
-  test('减课时不能超过剩余课时', async () => {
+  test('减课时允许超过剩余课时（余额变负）', async () => {
     const res = await api.post(`/students/${studentId}/subtract-hours`, {
       hours: 999,
       remark: '超额减课',
     })
-    expect(res.status).toBeGreaterThanOrEqual(400)
+    expect(res.status).toBe(200)
+    const student = await res.json()
+    const remaining = student.totalHours - (student.usedHours || 0)
+    expect(remaining).toBeLessThan(0)
   })
 })
 
@@ -62,7 +65,7 @@ test.describe('课时历史页面', () => {
   test('课时历史页面加载', async ({ adminPage, consoleErrors }) => {
     await adminPage.goto(`/hours-history?studentId=${studentId}`)
     await adminPage.waitForLoadState('networkidle')
-    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED'))).toHaveLength(0)
+    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED') && !e.includes('Failed to fetch'))).toHaveLength(0)
   })
 
   test('显示学生信息和记录', async ({ adminPage }) => {

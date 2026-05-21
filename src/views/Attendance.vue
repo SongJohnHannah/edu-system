@@ -11,6 +11,9 @@
       <p>请先创建课程后再进行点名</p>
       <router-link to="/courses" class="btn btn-primary" style="margin-top: 12px">去创建课程</router-link>
     </div>
+    <div class="tip" v-else-if="filteredCourses.length === 0">
+      <p>当前选择的星期几没有课程，请切换到有课程的日期</p>
+    </div>
 
     <template v-else>
       <div class="select-course">
@@ -46,11 +49,11 @@
             </div>
           </div>
           <div class="students">
-            <label class="student-item" v-for="student in courseStudents" :key="student.id">
+            <label class="student-item" v-for="student in sortedCourseStudents" :key="student.id" :class="{ 'student-insufficient': isInsufficient(student) && checkedStudents.includes(student.id) }">
               <input type="checkbox" :value="student.id" v-model="checkedStudents" />
               <div class="student-info">
                 <span class="student-name">{{ student.name }}</span>
-                <span class="student-hours">剩余 {{ student.totalHours - (student.usedHours || 0) }} 课时</span>
+                <span class="student-hours" :class="{ 'hours-negative': getRemainingHours(student) < 0, 'hours-low': isInsufficient(student) && getRemainingHours(student) >= 0 }">{{ formatRemaining(student) }}</span>
               </div>
               <span class="check-mark" v-if="checkedStudents.includes(student.id)">✓</span>
             </label>
@@ -58,8 +61,8 @@
         </div>
 
         <div class="deduct-info">
-          <span>将扣除 <strong>{{ selectedCourse.hoursPerClass || 1 }}</strong> 课时/人</span>
-          <span>共 <strong>{{ checkedStudents.length * (selectedCourse.hoursPerClass || 1) }}</strong> 课时</span>
+          <span>将扣除 <strong>{{ selectedCourse.hoursPerClass ?? 1 }}</strong> 课时/人</span>
+          <span>共 <strong>{{ checkedStudents.length * (selectedCourse.hoursPerClass ?? 1) }}</strong> 课时</span>
         </div>
 
         <button class="btn btn-primary btn-lg" @click="handleConfirmClick" :disabled="checkedStudents.length === 0">
@@ -74,11 +77,17 @@
           <div class="confirm-warning" v-if="isDuplicateAttendance">
             <p>⚠️ 该课程今天已经点过名了，是否继续点名？</p>
           </div>
-          <div class="confirm-info">
+          <div class="confirm-warning" v-if="insufficientStudents.length > 0">
+            <p>⚠️ 以下学生课时不足，扣除后余额将为负数：</p>
+            <ul class="insufficient-list">
+              <li v-for="s in insufficientStudents" :key="s.name">{{ s.name }}（{{ s.remaining }}）</li>
+            </ul>
+          </div>
+          <div class="confirm-info" v-if="insufficientStudents.length === 0">
             <p>课程：<strong>{{ selectedCourse?.name }}</strong></p>
             <p>出勤学生：<strong>{{ checkedStudents.length }}</strong> 人</p>
-            <p>扣除课时：<strong>{{ selectedCourse?.hoursPerClass || 1 }}</strong> 课时/人</p>
-            <p>共计：<strong>{{ checkedStudents.length * (selectedCourse?.hoursPerClass || 1) }}</strong> 课时</p>
+            <p>扣除课时：<strong>{{ selectedCourse?.hoursPerClass ?? 1 }}</strong> 课时/人</p>
+            <p>共计：<strong>{{ checkedStudents.length * (selectedCourse?.hoursPerClass ?? 1) }}</strong> 课时</p>
           </div>
           <div class="modal-actions">
             <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
@@ -153,7 +162,7 @@
               </div>
               <div class="history-row">
                 <span class="history-students">出勤: {{ getStudentNames(record.studentIds) }}</span>
-                <span class="history-hours">扣除 {{ record.hoursDeducted }} 课时/人</span>
+                <span class="history-hours">扣除 {{ record.hoursDeducted ?? 1 }} 课时/人</span>
               </div>
             </div>
             <button class="btn btn-text delete-btn" @click="openDeleteModal(record)" v-if="canDeleteRecord(record)">删除</button>
@@ -262,9 +271,36 @@ function hasTodayAttendance() {
   )
 }
 
+// 课时不足的学生
+const insufficientStudents = ref([])
+
+function getRemainingHours(student) {
+  return (student.totalHours || 0) - (student.usedHours || 0)
+}
+
+function formatRemaining(student) {
+  const r = getRemainingHours(student)
+  return r < 0 ? `欠 ${Math.abs(r)} 课时` : `剩余 ${r} 课时`
+}
+
+function formatRemainingShort(student) {
+  const r = getRemainingHours(student)
+  return r < 0 ? `欠${Math.abs(r)}课时` : `余${r}课时`
+}
+
+function isInsufficient(student) {
+  if (!selectedCourse.value) return false
+  return getRemainingHours(student) < (selectedCourse.value.hoursPerClass ?? 1)
+}
+
 // 点击确认点名按钮
 function handleConfirmClick() {
   isDuplicateAttendance.value = hasTodayAttendance()
+  const hoursNeeded = selectedCourse.value?.hoursPerClass ?? 1
+  insufficientStudents.value = checkedStudents.value
+    .map(id => courseStudents.value.find(s => s.id === id))
+    .filter(s => s && getRemainingHours(s) < hoursNeeded)
+    .map(s => ({ name: s.name, remaining: formatRemainingShort(s) }))
   showConfirmModal.value = true
 }
 
@@ -280,6 +316,11 @@ async function loadData() {
   const pageData = page || {}
   attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
   hasMoreRecords.value = pageData.hasMore || false
+
+  if (courses.value.length > 0 && !courses.value.some(c => c.weekday === selectedWeekday.value)) {
+    const weekdays = [...new Set(courses.value.map(c => c.weekday))].sort()
+    selectedWeekday.value = weekdays[0]
+  }
 }
 
 onMounted(async () => {
@@ -310,6 +351,10 @@ async function loadMoreRecords() {
 
 const selectedCourse = computed(() => {
   return courses.value.find(c => c.id === selectedCourseId.value)
+})
+
+const sortedCourseStudents = computed(() => {
+  return [...courseStudents.value].sort((a, b) => getRemainingHours(a) - getRemainingHours(b))
 })
 
 const filteredCourses = computed(() => {
@@ -357,7 +402,7 @@ function getCourseName(courseId) {
 }
 
 function getStudentNames(studentIds) {
-  return studentIds.map(id => {
+  return (studentIds || []).map(id => {
     const student = students.value.find(s => s.id === id)
     return student ? student.name : ''
   }).filter(Boolean).join('、')
@@ -368,7 +413,7 @@ function loadCourseStudents() {
     courseStudents.value = []
     return
   }
-  courseStudents.value = selectedCourse.value.studentIds
+  courseStudents.value = (selectedCourse.value.studentIds || [])
     .map(id => students.value.find(s => s.id === id))
     .filter(Boolean)
     .filter(s => s.status === 'active')
@@ -603,6 +648,20 @@ async function confirmDeleteStudents() {
 
 .student-item:has(input:checked) {
   background: rgba(0, 113, 227, 0.1);
+}
+
+.student-item.student-insufficient {
+  background: rgba(255, 59, 48, 0.08);
+}
+
+.hours-low {
+  color: var(--color-danger) !important;
+  font-weight: 500;
+}
+
+.hours-negative {
+  color: var(--color-danger) !important;
+  font-weight: 700;
 }
 
 .student-item input {
@@ -960,6 +1019,34 @@ async function confirmDeleteStudents() {
   color: #856404;
   font-size: 14px;
   font-weight: 500;
+}
+
+.confirm-error {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.confirm-error p {
+  color: #991b1b;
+}
+
+.insufficient-list {
+  margin: 8px 0;
+  padding-left: 20px;
+  color: #991b1b;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.insufficient-list li {
+  margin-bottom: 2px;
+}
+
+.insufficient-hint {
+  font-size: 13px !important;
+  font-weight: 400 !important;
+  color: #b91c1c !important;
+  margin-top: 6px !important;
 }
 
 @media (max-width: 768px) {

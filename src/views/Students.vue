@@ -236,8 +236,7 @@
           </div>
           <div class="form-group">
             <label>{{ addHoursForm.type === 'add' ? '增加课时数' : '减少课时数' }} *</label>
-            <input type="number" class="input" v-model.number="addHoursForm.hours" required min="0.5" step="0.5" :max="addHoursForm.type === 'subtract' ? (hoursStudent ? (hoursStudent.totalHours || 0) - (hoursStudent.usedHours || 0) : 0.5) : undefined" :placeholder="addHoursForm.type === 'add' ? '请输入要增加的课时数' : '请输入要减少的课时数'" />
-            <span class="form-hint" v-if="addHoursForm.type === 'subtract' && hoursStudent">最多可减少 {{ (hoursStudent.totalHours || 0) - (hoursStudent.usedHours || 0) }} 课时</span>
+            <input type="number" class="input" v-model.number="addHoursForm.hours" required min="0.5" step="0.5" :placeholder="addHoursForm.type === 'add' ? '请输入要增加的课时数' : '请输入要减少的课时数'" />
           </div>
           <div class="form-group">
             <label>备注</label>
@@ -392,14 +391,16 @@ function getStudentStatusText(student) {
 // 课时状态（自动计算）
 function getHoursStatusClass(student) {
   const remaining = (student.totalHours || 0) - (student.usedHours || 0)
-  if (remaining <= 0) return 'badge-danger'
+  if (remaining < 0) return 'badge-danger'
+  if (remaining === 0) return 'badge-danger'
   if (remaining < 3) return 'badge-warning'
   return 'badge-success'
 }
 
 function getHoursStatusText(student) {
   const remaining = (student.totalHours || 0) - (student.usedHours || 0)
-  if (remaining <= 0) return '已耗尽'
+  if (remaining < 0) return `欠${Math.abs(remaining)}课时`
+  if (remaining === 0) return '已耗尽'
   if (remaining < 3) return '不足'
   return '正常'
 }

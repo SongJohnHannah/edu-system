@@ -213,10 +213,6 @@ export async function subtractHours(id, hours, remark, operator) {
     const [students] = await conn.execute('SELECT * FROM students WHERE id = ? FOR UPDATE', [id])
     if (students.length === 0) throw new Error('学生不存在')
     const student = students[0]
-    const remaining = student.total_hours - (student.used_hours || 0)
-    if (hours > remaining) {
-      throw new Error(`减课时数不能超过剩余课时（当前剩余 ${remaining} 课时）`)
-    }
     await conn.execute('UPDATE students SET total_hours = total_hours - ? WHERE id = ?', [hours, id])
     const recordId = generateId()
     await conn.execute(
