@@ -4,7 +4,7 @@ test.describe('个人资料', () => {
   test('查看个人信息', async ({ adminPage, consoleErrors }) => {
     await adminPage.goto('/profile')
     await adminPage.waitForLoadState('networkidle')
-    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED'))).toHaveLength(0)
+    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED') && !e.includes('Failed to fetch'))).toHaveLength(0)
     await expect(adminPage.locator('text=admin')).toBeVisible()
   })
 

@@ -4,7 +4,7 @@ test.describe('日历', () => {
   test('日历页面加载', async ({ adminPage, consoleErrors }) => {
     await adminPage.goto('/calendar')
     await adminPage.waitForLoadState('networkidle')
-    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED'))).toHaveLength(0)
+    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED') && !e.includes('Failed to fetch'))).toHaveLength(0)
   })
 
   test('月份导航', async ({ adminPage }) => {

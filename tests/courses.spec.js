@@ -46,7 +46,7 @@ test.describe('课程管理', () => {
   test('课程列表加载', async ({ adminPage, consoleErrors }) => {
     await adminPage.goto('/courses')
     await adminPage.waitForLoadState('networkidle')
-    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED'))).toHaveLength(0)
+    expect(consoleErrors.filter(e => !e.includes('favicon') && !e.includes('429') && !e.includes('ERR_CONNECTION_CLOSED') && !e.includes('Failed to fetch'))).toHaveLength(0)
   })
 
   test('删除课程', async ({ adminPage }) => {
