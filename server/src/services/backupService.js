@@ -40,6 +40,7 @@ export async function exportData() {
       })),
       hourRecords: hourRecords.map(r => ({
         ...r,
+        hours: Number(r.hours),
         studentId: r.student_id,
         relatedId: r.related_id,
         isTest: !!r.is_test,

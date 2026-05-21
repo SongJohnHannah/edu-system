@@ -65,7 +65,7 @@ export async function saveTeachers(teachers) {
 export async function addTeacher(teacher) {
   const result = await api.post('/teachers', teacher)
   const allTeachers = await api.get('/teachers')
-  return { students: allTeachers, defaultPassword: result.defaultPassword, username: result.username }
+  return { teachers: allTeachers, defaultPassword: result.defaultPassword, username: result.username }
 }
 
 export async function updateTeacher(id, updates) {
@@ -132,10 +132,13 @@ export async function addAttendance(record) {
 }
 
 export async function deductHours(studentId, hours, relatedId = null) {
+  const now = new Date()
+  const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   await api.post('/attendance', {
     courseId: relatedId,
     studentIds: [studentId],
-    hoursDeducted: hours
+    hoursDeducted: hours,
+    date
   })
   return api.get('/students')
 }
@@ -213,23 +216,47 @@ export async function getClassName(classId) {
 // ========== 数据备份与恢复 ==========
 
 export async function exportData() {
+  const token = localStorage.getItem('access_token')
   const resp = await fetch('/edusystem/api/backup/export', {
-    headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+    headers: { 'Authorization': `Bearer ${token}` }
   })
+  if (resp.status === 401) {
+    const refreshed = await api.tryRefresh()
+    if (refreshed) {
+      const retryResp = await fetch('/edusystem/api/backup/export', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
+      })
+      return await retryResp.text()
+    }
+  }
   return await resp.text()
 }
 
 export async function importData(fileContent) {
   try {
     if (fileContent.trim().startsWith('--')) {
-      const resp = await fetch('/edusystem/api/backup/import-sql', {
+      const token = localStorage.getItem('access_token')
+      let resp = await fetch('/edusystem/api/backup/import-sql', {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+          'Authorization': `Bearer ${token}`
         },
         body: fileContent
       })
+      if (resp.status === 401) {
+        const refreshed = await api.tryRefresh()
+        if (refreshed) {
+          resp = await fetch('/edusystem/api/backup/import-sql', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'text/plain',
+              'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+            },
+            body: fileContent
+          })
+        }
+      }
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ message: `HTTP ${resp.status}` }))
         return { success: false, message: err.message || err.error || 'SQL导入失败' }

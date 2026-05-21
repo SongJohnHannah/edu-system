@@ -26,6 +26,9 @@ router.post('/', filterByTeacher, async (req, res, next) => {
 router.put('/:id', filterByTeacher, async (req, res, next) => {
   try {
     await courseService.verifyAccess(req.params.id, req.teacherScope)
+    if (req.teacherScope && req.body.teacherId && req.body.teacherId !== req.teacherScope) {
+      return res.status(403).json({ error: '教师不能转让课程，请使用课程交接功能' })
+    }
     await studentService.validateStudentsForCourse(req.body.studentIds, req.teacherScope, req.params.id)
     const course = await courseService.update(req.params.id, req.body)
     res.json(course)

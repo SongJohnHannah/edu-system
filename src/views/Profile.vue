@@ -20,10 +20,6 @@
           <label>用户名</label>
           <span>{{ profile.username }}</span>
         </div>
-        <div class="info-item" v-if="profile.teacher">
-          <label>教师姓名</label>
-          <span>{{ profile.teacher.name }}</span>
-        </div>
         <div class="info-item" v-if="profile.teacher && profile.teacher.phone">
           <label>联系电话</label>
           <span>{{ profile.teacher.phone }}</span>
@@ -40,7 +36,7 @@
       <h3 class="section-title">修改姓名</h3>
       <form @submit.prevent="handleUpdateName" class="profile-form">
         <div class="form-group">
-          <label class="form-label">显示名称</label>
+          <label class="form-label">姓名</label>
           <input type="text" class="input" v-model="nameForm.displayName" required />
         </div>
         <button type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
@@ -107,8 +103,10 @@ async function handleUpdateName() {
   try {
     const updated = await api.put('/auth/profile', { displayName: nameForm.value.displayName })
     profile.value = updated
-    authStore.user.displayName = updated.displayName
-    localStorage.setItem('user', JSON.stringify(authStore.user))
+    if (authStore.user) {
+      authStore.user.displayName = updated.displayName
+      localStorage.setItem('user', JSON.stringify(authStore.user))
+    }
   } catch (err) {
     toast.error(err.message || '修改失败')
   } finally {

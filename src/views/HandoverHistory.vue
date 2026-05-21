@@ -46,7 +46,7 @@ const records = ref([])
 
 onMounted(async () => {
   try {
-    records.value = await getHandoverHistory()
+    records.value = await getHandoverHistory() || []
   } catch {}
 })
 

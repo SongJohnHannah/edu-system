@@ -5,6 +5,7 @@ import { formatDateTime } from '../utils/dateFormat.js'
 function formatRecord(row) {
   return {
     ...row,
+    hours: Number(row.hours),
     studentId: row.student_id,
     relatedId: row.related_id,
     createdAt: formatDateTime(row.created_at)

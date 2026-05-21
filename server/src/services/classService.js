@@ -48,6 +48,16 @@ export async function update(id, data) {
 }
 
 export async function remove(id) {
-  await pool.execute('UPDATE students SET class_id = \'\' WHERE class_id = ?', [id])
-  await pool.execute('DELETE FROM classes WHERE id = ?', [id])
+  const conn = await pool.getConnection()
+  try {
+    await conn.beginTransaction()
+    await conn.execute('UPDATE students SET class_id = \'\' WHERE class_id = ?', [id])
+    await conn.execute('DELETE FROM classes WHERE id = ?', [id])
+    await conn.commit()
+  } catch (err) {
+    await conn.rollback()
+    throw err
+  } finally {
+    conn.release()
+  }
 }

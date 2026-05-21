@@ -1,5 +1,8 @@
 <template>
   <div class="app">
+    <div class="global-progress" :class="{ active: apiLoading, done: apiLoadingDone }">
+      <div class="global-progress-bar"></div>
+    </div>
     <!-- 桌面端顶部导航 -->
     <header v-if="!isLoginPage" class="header desktop-nav" :class="{ 'header-electron': isElectronEnv }">
       <div class="header-content">
@@ -227,7 +230,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Toast from './components/Toast.vue'
 import { downloadBackup, importData, getStorePath, checkIsElectron } from './utils/storage'
@@ -236,6 +239,41 @@ import { useToast } from './composables/useToast'
 const useApi = import.meta.env.VITE_USE_API === 'true'
 const router = useRouter()
 const toast = useToast()
+
+// 全局 API 加载进度条
+const apiLoading = ref(false)
+const apiLoadingDone = ref(false)
+let activeRequests = 0
+let doneTimer = null
+
+function onApiStart() {
+  activeRequests++
+  apiLoading.value = true
+  apiLoadingDone.value = false
+  clearTimeout(doneTimer)
+}
+
+function onApiEnd() {
+  activeRequests = Math.max(0, activeRequests - 1)
+  if (activeRequests === 0) {
+    apiLoadingDone.value = true
+    doneTimer = setTimeout(() => {
+      apiLoading.value = false
+      apiLoadingDone.value = false
+    }, 300)
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('api-loading-start', onApiStart)
+  window.addEventListener('api-loading-end', onApiEnd)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('api-loading-start', onApiStart)
+  window.removeEventListener('api-loading-end', onApiEnd)
+  clearTimeout(doneTimer)
+})
 
 const vClickOutside = {
   mounted(el, binding) {
@@ -353,6 +391,55 @@ async function handleImport(event) {
 </script>
 
 <style scoped>
+.global-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  z-index: 9999;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.global-progress.active {
+  opacity: 1;
+}
+
+.global-progress.done {
+  opacity: 1;
+}
+
+.global-progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--color-primary);
+  border-radius: 0 2px 2px 0;
+  transition: none;
+}
+
+.global-progress.active .global-progress-bar {
+  animation: progress-advance 8s ease-out forwards;
+}
+
+.global-progress.done .global-progress-bar {
+  animation: progress-complete 0.3s ease-out forwards;
+}
+
+@keyframes progress-advance {
+  0% { width: 0; }
+  20% { width: 30%; }
+  50% { width: 55%; }
+  80% { width: 75%; }
+  100% { width: 90%; }
+}
+
+@keyframes progress-complete {
+  from { width: 90%; }
+  to { width: 100%; }
+}
+
 .app {
   min-height: 100vh;
   background: var(--color-bg-secondary);

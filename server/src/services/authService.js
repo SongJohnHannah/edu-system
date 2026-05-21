@@ -149,6 +149,14 @@ export async function updateProfile(userId, { displayName }) {
   updates.push('updated_at = NOW()')
   values.push(userId)
   await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values)
+
+  // 同步 teachers.name
+  if (displayName) {
+    const [rows] = await pool.execute('SELECT teacher_id FROM users WHERE id = ?', [userId])
+    if (rows[0]?.teacher_id) {
+      await pool.execute('UPDATE teachers SET name = ? WHERE id = ?', [displayName, rows[0].teacher_id])
+    }
+  }
 }
 
 export async function updateUserByAdmin(userId, { displayName, phone }) {
@@ -169,13 +177,18 @@ export async function updateUserByAdmin(userId, { displayName, phone }) {
   // Update teacher phone if teacher_id exists, also sync login username
   const [rows] = await pool.execute('SELECT teacher_id, username FROM users WHERE id = ?', [userId])
   const user = rows[0]
-  if (user?.teacher_id && phone !== undefined) {
-    await pool.execute('UPDATE teachers SET phone = ? WHERE id = ?', [phone, user.teacher_id])
-    // 同步更新登录用户名（联系电话 = 登录账号）
-    if (phone && phone !== user.username) {
-      const [dupUser] = await pool.execute('SELECT id FROM users WHERE username = ? AND id != ?', [phone, userId])
-      if (dupUser.length > 0) throw new Error('该手机号已被其他账号使用')
-      await pool.execute('UPDATE users SET username = ? WHERE id = ?', [phone, userId])
+  if (user?.teacher_id) {
+    if (displayName) {
+      await pool.execute('UPDATE teachers SET name = ? WHERE id = ?', [displayName, user.teacher_id])
+    }
+    if (phone !== undefined) {
+      await pool.execute('UPDATE teachers SET phone = ? WHERE id = ?', [phone, user.teacher_id])
+      // 同步更新登录用户名（联系电话 = 登录账号）
+      if (phone && phone !== user.username) {
+        const [dupUser] = await pool.execute('SELECT id FROM users WHERE username = ? AND id != ?', [phone, userId])
+        if (dupUser.length > 0) throw new Error('该手机号已被其他账号使用')
+        await pool.execute('UPDATE users SET username = ? WHERE id = ?', [phone, userId])
+      }
     }
   }
 }

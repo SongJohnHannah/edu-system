@@ -13,6 +13,7 @@ router.get('/', filterByTeacher, async (req, res, next) => {
 
 router.post('/', filterByTeacher, async (req, res, next) => {
   try {
+    if (req.teacherScope) return res.status(403).json({ error: '教师无权管理班级' })
     const cls = await classService.create(req.body)
     res.status(201).json(cls)
   } catch (err) { next(err) }
@@ -20,6 +21,7 @@ router.post('/', filterByTeacher, async (req, res, next) => {
 
 router.put('/:id', filterByTeacher, async (req, res, next) => {
   try {
+    if (req.teacherScope) return res.status(403).json({ error: '教师无权管理班级' })
     const cls = await classService.update(req.params.id, req.body)
     res.json(cls)
   } catch (err) { next(err) }
@@ -27,6 +29,7 @@ router.put('/:id', filterByTeacher, async (req, res, next) => {
 
 router.delete('/:id', filterByTeacher, async (req, res, next) => {
   try {
+    if (req.teacherScope) return res.status(403).json({ error: '教师无权管理班级' })
     await classService.remove(req.params.id)
     res.json({ success: true })
   } catch (err) { next(err) }

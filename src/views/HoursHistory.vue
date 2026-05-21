@@ -21,7 +21,7 @@
       </div>
       <div class="stat-item highlight">
         <span class="stat-label">剩余课时</span>
-        <span class="stat-value">{{ student.totalHours - (student.usedHours || 0) }}</span>
+        <span class="stat-value">{{ (student.totalHours || 0) - (student.usedHours || 0) }}</span>
       </div>
       <div class="stat-divider"></div>
       <div class="stat-item">
@@ -76,7 +76,7 @@
               </span>
             </td>
             <td :class="getHoursClass(record.type)">
-              {{ (record.type === 'deduct' || record.type === 'subtract') ? '-' : '+' }}{{ record.hours }}
+              {{ (record.type === 'deduct' || record.type === 'subtract') ? '-' : '+' }}{{ record.hours ?? 0 }}
             </td>
             <td>{{ record.remark || '-' }}</td>
           </tr>
@@ -127,25 +127,25 @@ const filteredRecords = computed(() => {
 const totalAdded = computed(() => {
   return records.value
     .filter(r => r.type === 'add')
-    .reduce((sum, r) => sum + r.hours, 0)
+    .reduce((sum, r) => sum + (r.hours || 0), 0)
 })
 
 const totalSubtracted = computed(() => {
   return records.value
     .filter(r => r.type === 'subtract')
-    .reduce((sum, r) => sum + r.hours, 0)
+    .reduce((sum, r) => sum + (r.hours || 0), 0)
 })
 
 const totalDeducted = computed(() => {
   return records.value
     .filter(r => r.type === 'deduct')
-    .reduce((sum, r) => sum + r.hours, 0)
+    .reduce((sum, r) => sum + (r.hours || 0), 0)
 })
 
 const totalRestored = computed(() => {
   return records.value
     .filter(r => r.type === 'restore')
-    .reduce((sum, r) => sum + r.hours, 0)
+    .reduce((sum, r) => sum + (r.hours || 0), 0)
 })
 
 function formatDate(timestamp) {

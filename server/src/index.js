@@ -60,13 +60,27 @@ app.use(`${API_PREFIX}/handovers`, verifyToken, handoverRoutes)
 // 清理测试数据（仅管理员）
 app.delete(`${API_PREFIX}/admin/test-data`, verifyToken, requireRole('admin'), async (req, res) => {
   const pool = (await import('./config/database.js')).default
-  const tables = ['attendance', 'hour_records', 'courses', 'classes', 'students', 'course_handovers', 'teachers', 'users']
   const counts = {}
-  for (const table of tables) {
+  // 按外键依赖顺序删除：attendance → hour_records → handovers → courses → students → classes → users → teachers
+  const order = ['attendance', 'hour_records', 'course_handovers', 'courses', 'students', 'classes', 'users', 'teachers']
+  for (const table of order) {
+    try {
+      if (table === 'users') {
+        // users 没有 is_test 字段，用 teacher_id 关联清理
+        const [result] = await pool.execute('DELETE FROM users WHERE teacher_id IN (SELECT id FROM teachers WHERE is_test = 1)')
+        counts[table] = result.affectedRows
+      } else {
+        const [result] = await pool.execute(`DELETE FROM ${table} WHERE is_test = 1`)
+        counts[table] = result.affectedRows
+      }
+    } catch { counts[table] = 0 }
+  }
+  // 再跑一轮确保级联残留也清掉
+  for (const table of ['attendance', 'hour_records', 'course_handovers', 'courses', 'students', 'classes', 'teachers']) {
     try {
       const [result] = await pool.execute(`DELETE FROM ${table} WHERE is_test = 1`)
-      counts[table] = result.affectedRows
-    } catch { counts[table] = 0 }
+      if (result.affectedRows > 0) counts[table] = (counts[table] || 0) + result.affectedRows
+    } catch {}
   }
   res.json({ deleted: counts })
 })

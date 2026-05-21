@@ -21,7 +21,7 @@
 
     <div class="teachers-grid" v-if="filteredTeachers.length > 0">
       <div class="teacher-card" :class="{ 'card-deleted': teacher.status === 'deleted' }" v-for="teacher in filteredTeachers" :key="teacher.id">
-        <div class="teacher-avatar">{{ teacher.name.charAt(0) }}</div>
+        <div class="teacher-avatar">{{ (teacher.name || '?').charAt(0) }}</div>
         <div class="teacher-info">
           <h3 class="teacher-name">
             {{ teacher.name }}
@@ -151,7 +151,7 @@
           <div class="handover-course-list">
             <label class="handover-course-item" v-for="course in handoverCourses" :key="course.id">
               <input type="checkbox" :value="course.id" v-model="handoverSelectedCourses" />
-              <span>{{ course.name }}（{{ ['日','一','二','三','四','五','六'][course.weekday || 0] }} {{ course.startTime }}-{{ course.endTime }}）</span>
+              <span>{{ course.name }}（{{ {1:'一',2:'二',3:'三',4:'四',5:'五',6:'六',7:'日'}[course.weekday] || '日' }} {{ course.startTime }}-{{ course.endTime }}）</span>
             </label>
           </div>
         </div>
@@ -259,7 +259,7 @@ async function saveTeacher() {
       teachers.value = await updateTeacher(editingTeacher.value.id, form.value)
     } else {
       const result = await addTeacher(form.value)
-      teachers.value = result.students || result
+      teachers.value = result.teachers || result
       // API 模式下显示默认密码
       if (useApi && result.defaultPassword) {
         successInfo.value = { username: result.username, password: result.defaultPassword }

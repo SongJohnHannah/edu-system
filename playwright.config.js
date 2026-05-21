@@ -17,4 +17,5 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { browserName: 'chromium' } },
   ],
+  globalTeardown: './tests/global-teardown.js',
 })

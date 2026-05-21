@@ -66,9 +66,15 @@
         <div class="detail-subtitle">课程安排</div>
         <div class="detail-list">
           <div class="detail-item course-item" v-for="course in selectedDateInfo.courses" :key="course.id">
-            <div class="detail-course">{{ course.name }}</div>
-            <div class="detail-teacher">{{ course.teacherName }}</div>
-            <div class="detail-time" v-if="course.startTime">{{ course.startTime }} - {{ course.endTime }}</div>
+            <div class="course-info-col">
+              <div class="detail-course">{{ course.name }}</div>
+              <div class="detail-teacher">{{ course.teacherName }}</div>
+              <div class="detail-time" v-if="course.startTime">{{ course.startTime }} - {{ course.endTime }}</div>
+            </div>
+            <div class="course-students-col" v-if="getStudentNames(course.studentIds)">
+              <div class="students-label">学生</div>
+              <div class="students-names">{{ getStudentNames(course.studentIds) }}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -135,7 +141,7 @@ const attendanceMap = computed(() => {
     const key = r.date
     if (!map.has(key)) map.set(key, { count: 0, records: [] })
     const entry = map.get(key)
-    entry.count += r.studentIds.length
+    entry.count += (r.studentIds || []).length
     entry.records.push(r)
   }
   return map
@@ -231,7 +237,7 @@ function getCourseName(courseId) {
 }
 
 function getStudentNames(studentIds) {
-  return studentIds.map(id => {
+  return (studentIds || []).map(id => {
     const student = students.value.find(s => s.id === id)
     return student ? student.name : ''
   }).filter(Boolean).join('、')
@@ -531,6 +537,33 @@ function hideTooltip() {
 
 .course-item {
   border-left: 3px solid var(--color-success);
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.course-info-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.course-students-col {
+  flex: 1;
+  min-width: 0;
+  border-left: 1px solid var(--color-border, #e5e5e5);
+  padding-left: 16px;
+}
+
+.students-label {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.students-names {
+  font-size: 14px;
+  color: var(--color-text);
+  line-height: 1.6;
 }
 
 .detail-teacher {
@@ -644,6 +677,18 @@ function hideTooltip() {
 
   .attendance-detail {
     padding: 16px;
+  }
+
+  .course-item {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .course-students-col {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--color-border, #e5e5e5);
+    padding-top: 12px;
   }
 }
 </style>

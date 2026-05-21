@@ -38,44 +38,50 @@ async function refreshAccessToken() {
 }
 
 async function request(method, path, data = null) {
-  const headers = { 'Content-Type': 'application/json' }
-  const accessToken = getAccessToken()
-  if (accessToken) {
-    headers['Authorization'] = `Bearer ${accessToken}`
-  }
-
-  const options = { method, headers }
-  if (data && method !== 'GET') {
-    options.body = JSON.stringify(data)
-  }
-
-  let response = await fetch(`${API_BASE}${path}`, options)
-
-  if (response.status === 401 && getRefreshToken()) {
-    const refreshed = await refreshAccessToken()
-    if (refreshed) {
-      headers['Authorization'] = `Bearer ${getAccessToken()}`
-      response = await fetch(`${API_BASE}${path}`, options)
-    } else {
-      clearTokens()
-      window.location.href = '/login'
-      throw new Error('登录已过期，请重新登录')
+  window.dispatchEvent(new Event('api-loading-start'))
+  try {
+    const headers = { 'Content-Type': 'application/json' }
+    const accessToken = getAccessToken()
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`
     }
-  }
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: '请求失败' }))
-    throw new Error(error.error || error.message || '请求失败')
-  }
+    const options = { method, headers, cache: 'no-store' }
+    if (data && method !== 'GET') {
+      options.body = JSON.stringify(data)
+    }
 
-  return response.json()
+    let response = await fetch(`${API_BASE}${path}`, options)
+
+    if (response.status === 401 && getRefreshToken()) {
+      const refreshed = await refreshAccessToken()
+      if (refreshed) {
+        headers['Authorization'] = `Bearer ${getAccessToken()}`
+        response = await fetch(`${API_BASE}${path}`, options)
+      } else {
+        clearTokens()
+        window.location.href = '/login'
+        throw new Error('登录已过期，请重新登录')
+      }
+    }
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: '请求失败' }))
+      throw new Error(error.error || error.message || '请求失败')
+    }
+
+    return response.json()
+  } finally {
+    window.dispatchEvent(new Event('api-loading-end'))
+  }
 }
 
 export const api = {
   get: (path) => request('GET', path),
   post: (path, data) => request('POST', path, data),
   put: (path, data) => request('PUT', path, data),
-  del: (path) => request('DELETE', path)
+  del: (path) => request('DELETE', path),
+  tryRefresh: refreshAccessToken
 }
 
 export { setTokens, clearTokens, getAccessToken, getRefreshToken }

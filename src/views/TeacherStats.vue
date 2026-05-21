@@ -93,7 +93,7 @@
             <tr v-for="stat in teacherStats" :key="stat.id">
               <td>
                 <div class="teacher-cell">
-                  <div class="teacher-avatar">{{ stat.name.charAt(0) }}</div>
+                  <div class="teacher-avatar">{{ (stat.name || '?').charAt(0) }}</div>
                   <span class="teacher-name">{{ stat.name }}</span>
                 </div>
               </td>
