@@ -73,8 +73,8 @@
               '--stack-total': c.stackSize,
               '--stack-translate': c.stackSize > 1
                 ? (expandedGroupId === c.groupId
-                    ? `${c.stackIndex * 32}px`
-                    : `${c.stackIndex * 10}px`)
+                    ? `${c.stackIndex * 28}px`
+                    : `${c.stackIndex * 22}px`)
                 : '0px',
               '--stack-z': c.stackSize > 1 ? (c.stackIndex + 10) : 1,
               gridColumn: c.col + 1,
@@ -405,12 +405,12 @@ const placedCourses = computed(() => {
     }
     for (const c of colCourses) {
       const cEnd = c.startRow + c.rowSpan
-      if (c.startRow < groupEndRow) {
-        // 与当前组重叠, 加入
+      if (c.startRow <= groupEndRow) {
+        // 与当前组重叠或首尾相接, 归入同一扑克牌组
         groupMembers.push(c)
         groupEndRow = Math.max(groupEndRow, cEnd)
       } else {
-        // 结束上一个组, 开始新的
+        // 不相邻, 开始新的组
         flushGroup()
         groupId = `${col}-${c.startRow}-${cEnd}`
         groupMembers = [c]
@@ -507,20 +507,14 @@ function handleBarClick(course) {
     openEdit(course)
     return
   }
-  // 移动端: 任何重叠数 → 弹列表
+  // 移动端: 任何重叠/相连 → 弹列表
   if (isMobile.value) {
     mobileListGroup.value = placedCourses.value
       .filter(c => c.groupId === course.groupId)
       .sort((a, b) => a.stackIndex - b.stackIndex)
     return
   }
-  // 桌面 2 个重叠: 直接编辑 (无需展开)
-  if (course.stackSize === 2) {
-    expandedGroupId.value = null
-    openEdit(course)
-    return
-  }
-  // 桌面 3-4 个重叠: 切换展开
+  // 桌面: 扑克牌 fan-out (≥2 张都展开)
   if (expandedGroupId.value === course.groupId) {
     // 已展开, 用户点击的是某一层 → 进入编辑
     openEdit(course)
@@ -841,7 +835,7 @@ function handleWindowClick(e) {
   border-left: 4px solid var(--c-border);
   border-radius: 8px;
   padding: 6px 10px;
-  margin: 2px 4px;
+  margin: 0 4px;
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -931,10 +925,11 @@ function handleWindowClick(e) {
 .course-bar.is-stacked {
   z-index: var(--stack-z);
   transform: translateY(var(--stack-translate));
-  margin: 2px 4px;
 }
 .course-bar.is-stacked.stack-expanded {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+  overflow: visible;
+  min-height: 96px;
 }
 .course-bar.is-stacked.stack-expanded:hover {
   transform: translateY(calc(var(--stack-translate) - 3px)) scale(1.02);
