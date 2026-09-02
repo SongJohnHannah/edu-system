@@ -11,26 +11,49 @@ function formatCourse(row) {
     hoursPerClass: Number(row.hours_per_class),
     studentIds: typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : (row.student_ids || []),
     isTest: !!row.is_test,
+    teacherName: row.teacher_name || '',
     createdAt: formatDateTime(row.created_at),
     updatedAt: formatDateTime(row.updated_at)
   }
 }
 
+async function buildTeacherNameMap(teacherIds) {
+  const ids = [...new Set(teacherIds.filter(Boolean))]
+  if (ids.length === 0) return new Map()
+  const placeholders = ids.map(() => '?').join(',')
+  const [rows] = await pool.execute(
+    `SELECT id, name FROM teachers WHERE id IN (${placeholders})`,
+    ids
+  )
+  return new Map(rows.map(r => [r.id, r.name]))
+}
+
+function attachTeacherNames(courses, nameMap) {
+  return courses.map(c => ({ ...c, teacherName: nameMap.get(c.teacherId) || c.teacherName || '' }))
+}
+
 export async function getAll(teacherScope) {
   if (!teacherScope) {
     const [rows] = await pool.execute('SELECT * FROM courses ORDER BY created_at DESC')
-    return rows.map(formatCourse)
+    const formatted = rows.map(formatCourse)
+    const nameMap = await buildTeacherNameMap(formatted.map(c => c.teacherId))
+    return attachTeacherNames(formatted, nameMap)
   }
   const [rows] = await pool.execute(
     'SELECT * FROM courses WHERE teacher_id = ? ORDER BY created_at DESC',
     [teacherScope]
   )
-  return rows.map(formatCourse)
+  const formatted = rows.map(formatCourse)
+  const nameMap = await buildTeacherNameMap(formatted.map(c => c.teacherId))
+  return attachTeacherNames(formatted, nameMap)
 }
 
 export async function getById(id) {
   const [rows] = await pool.execute('SELECT * FROM courses WHERE id = ?', [id])
-  return rows[0] ? formatCourse(rows[0]) : null
+  if (!rows[0]) return null
+  const formatted = formatCourse(rows[0])
+  const nameMap = await buildTeacherNameMap([formatted.teacherId])
+  return { ...formatted, teacherName: nameMap.get(formatted.teacherId) || '' }
 }
 
 export async function verifyAccess(id, teacherScope) {

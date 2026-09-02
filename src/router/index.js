@@ -44,6 +44,11 @@ const routes = [
     component: () => import('../views/Calendar.vue')
   },
   {
+    path: '/weekly-schedule',
+    name: 'WeeklySchedule',
+    component: () => import('../views/WeeklySchedule.vue')
+  },
+  {
     path: '/teacher-stats',
     name: 'TeacherStats',
     component: () => import('../views/TeacherStats.vue')

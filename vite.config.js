@@ -4,7 +4,7 @@ import { readFileSync } from 'fs'
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf-8'))
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   base: './',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version)
@@ -30,9 +30,9 @@ export default defineConfig({
     },
     proxy: {
       '/edusystem/api': {
-        target: 'http://localhost:3001',
+        target: mode === 'development' ? 'http://localhost:3101' : 'http://localhost:3001',
         changeOrigin: true
       }
     }
   }
-})
+}))

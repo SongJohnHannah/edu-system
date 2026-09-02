@@ -26,6 +26,7 @@ npm-debug.log*
 # Server
 server/node_modules/
 server/.env
+server/migrations/edu_system_snapshot.sql
 
 # Test
 test-results/

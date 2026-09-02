@@ -17,6 +17,7 @@
           <router-link to="/" class="nav-item" exact-active-class="active">首页</router-link>
           <router-link to="/students" class="nav-item" active-class="active">学生</router-link>
           <router-link to="/courses" class="nav-item" active-class="active">课程安排</router-link>
+          <router-link to="/weekly-schedule" class="nav-item" active-class="active">周排课</router-link>
           <router-link to="/attendance" class="nav-item" active-class="active">点名</router-link>
           <router-link to="/calendar" class="nav-item" active-class="active">日历</router-link>
           <div class="nav-more">
@@ -145,6 +146,15 @@
     <!-- 移动端更多菜单 -->
     <div class="mobile-more-overlay" v-if="showMoreMenu" @click="showMoreMenu = false">
       <div class="mobile-more-menu" @click.stop>
+        <router-link to="/weekly-schedule" class="more-item" @click="showMoreMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+          </svg>
+          <span>周排课</span>
+        </router-link>
         <router-link to="/teachers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -311,6 +321,7 @@ const currentPageTitle = computed(() => {
     '/courses': '课程安排',
     '/attendance': '点名',
     '/calendar': '日历',
+    '/weekly-schedule': '周排课',
     '/teacher-stats': '教师统计',
     '/profile': '个人资料',
     '/handovers': '交接记录',
