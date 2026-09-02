@@ -47,37 +47,84 @@
           <div class="swimlane-label">晚上<br />18:00 – 22:30</div>
         </div>
 
+        <!-- 30 分钟虚线参考层 -->
+        <div class="time-rules">
+          <div v-for="r in ROWS" :key="r" class="time-rule" :class="{ 'major': (r - 1) % 2 === 0 }"></div>
+        </div>
+
         <!-- 课程 bar -->
         <TransitionGroup name="bar" tag="div" class="bars-layer">
           <div
             v-for="(c, i) in placedCourses"
             :key="c.id"
             class="course-bar"
-            :class="{ 'out-of-bounds': c.outOfBounds, 'has-overlap': c.overlap }"
+            :class="{
+              'out-of-bounds': c.outOfBounds,
+              'has-overlap': c.overlap,
+              'is-stacked': c.stackSize > 1,
+              'stack-expanded': c.stackSize > 1 && expandedGroupId === c.groupId
+            }"
             :style="{
               '--c-bg': c.color.bg,
               '--c-fg': c.color.fg,
               '--c-border': c.color.border,
               '--idx': i,
+              '--stack-idx': c.stackIndex,
+              '--stack-total': c.stackSize,
+              '--stack-translate': c.stackSize > 1
+                ? (expandedGroupId === c.groupId
+                    ? `${c.stackIndex * 32}px`
+                    : `${c.stackIndex * 10}px`)
+                : '0px',
+              '--stack-z': c.stackSize > 1 ? (c.stackIndex + 10) : 1,
               gridColumn: c.col + 1,
               gridRow: `${c.startRow} / span ${c.rowSpan}`
             }"
-            @click="openEdit(c)"
+            @click.stop="handleBarClick(c)"
           >
             <div class="bar-name">{{ c.name }}</div>
             <div class="bar-meta">
               {{ c.startTime }}–{{ c.endTime }}
               <span v-if="c.outOfBounds" class="warn-icon" title="时间超出 07:30–22:30 范围">⚠</span>
-              <span v-if="c.overlap" class="warn-icon" title="该时段存在重叠课程">⚠</span>
             </div>
             <div class="bar-bottom">
               <span class="bar-teacher">{{ c.teacherName || '未指定' }}</span>
               <span class="bar-students">{{ c.studentCount }} 人</span>
             </div>
+            <span v-if="c.stackSize > 1" class="stack-badge">+{{ c.stackSize }}</span>
           </div>
         </TransitionGroup>
       </div>
     </div>
+
+    <!-- 移动端重叠课程列表 -->
+    <Teleport to="body">
+      <Transition name="overlap-list">
+        <div v-if="mobileListGroup" class="overlap-list-overlay" @click.self="mobileListGroup = null">
+          <div class="overlap-list">
+            <div class="overlap-list-header">
+              <span class="overlap-list-title">{{ mobileListGroup.length }} 个课程在此重叠</span>
+              <button class="overlap-list-close" @click="mobileListGroup = null" aria-label="关闭">×</button>
+            </div>
+            <button
+              v-for="c in mobileListGroup"
+              :key="c.id"
+              class="overlap-list-item"
+              :style="{ borderLeftColor: c.color.border, background: c.color.bg }"
+              @click="selectFromList(c)"
+            >
+              <div class="overlap-list-name">{{ c.name }}</div>
+              <div class="overlap-list-meta">
+                <span>{{ c.startTime }}–{{ c.endTime }}</span>
+                <span class="dot">·</span>
+                <span>{{ c.teacherName || '未指定' }}</span>
+              </div>
+              <div class="overlap-list-students">{{ c.studentCount }} 人 · {{ c.classroom || '未指定教室' }}</div>
+            </button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- 空状态 -->
     <div v-if="placedCourses.length === 0" class="empty-state">
@@ -220,6 +267,12 @@ const editingCourse = ref(null)
 const studentSearchText = ref('')
 const submitting = ref(false)
 
+// 重叠课程交互
+const expandedGroupId = ref(null)        // 桌面: 哪个重叠组已展开
+const mobileListGroup = ref(null)        // 移动: 哪个重叠组弹出列表
+const isMobile = ref(false)               // 是否移动端
+const STACK_MAX = 4                       // 最多展示 4 张重叠卡
+
 const form = ref({
   name: '',
   teacherId: '',
@@ -324,23 +377,47 @@ const placedCourses = computed(() => {
       studentCount: (c.studentIds || []).length,
       teacherName: c.teacherName || getTeacherNameById(c.teacherId),
       outOfBounds,
-      overlap: false
+      overlap: false,
+      groupId: null,
+      stackIndex: 0,
+      stackSize: 1
     }
   })
 
-  // 检测重叠：同一 weekday + 行区间相交
-  for (let i = 0; i < placed.length; i++) {
-    for (let j = i + 1; j < placed.length; j++) {
-      const a = placed[i], b = placed[j]
-      if (a.col !== b.col) continue
-      const aEnd = a.startRow + a.rowSpan
-      const bEnd = b.startRow + b.rowSpan
-      const overlap = a.startRow < bEnd && b.startRow < aEnd
-      if (overlap) {
-        a.overlap = true
-        b.overlap = true
+  // 按列扫描, 用 sweep 算法识别重叠组 (含跨课程的传递重叠)
+  for (let col = 1; col <= 7; col++) {
+    const colCourses = placed
+      .filter(p => p.col === col)
+      .sort((a, b) => a.startRow - b.startRow || placed.indexOf(a) - placed.indexOf(b))
+
+    let groupId = null
+    let groupEndRow = 0
+    let groupMembers = []
+    const flushGroup = () => {
+      if (groupMembers.length < 2) return
+      const gid = groupId
+      groupMembers.forEach((m, idx) => {
+        m.overlap = true
+        m.groupId = gid
+        m.stackSize = groupMembers.length
+        m.stackIndex = idx
+      })
+    }
+    for (const c of colCourses) {
+      const cEnd = c.startRow + c.rowSpan
+      if (c.startRow < groupEndRow) {
+        // 与当前组重叠, 加入
+        groupMembers.push(c)
+        groupEndRow = Math.max(groupEndRow, cEnd)
+      } else {
+        // 结束上一个组, 开始新的
+        flushGroup()
+        groupId = `${col}-${c.startRow}-${cEnd}`
+        groupMembers = [c]
+        groupEndRow = cEnd
       }
     }
+    flushGroup()
   }
   return placed
 })
@@ -415,6 +492,52 @@ function closeModal() {
   editingCourse.value = null
   studentSearchText.value = ''
   submitting.value = false
+  mobileListGroup.value = null
+}
+
+// ============================ 重叠课程交互 ============================
+function checkMobile() {
+  isMobile.value = window.matchMedia('(pointer: coarse)').matches || window.innerWidth < 768
+}
+
+function handleBarClick(course) {
+  // 单卡: 直接编辑
+  if (course.stackSize <= 1) {
+    expandedGroupId.value = null
+    openEdit(course)
+    return
+  }
+  // 移动端: 任何重叠数 → 弹列表
+  if (isMobile.value) {
+    mobileListGroup.value = placedCourses.value
+      .filter(c => c.groupId === course.groupId)
+      .sort((a, b) => a.stackIndex - b.stackIndex)
+    return
+  }
+  // 桌面 2 个重叠: 直接编辑 (无需展开)
+  if (course.stackSize === 2) {
+    expandedGroupId.value = null
+    openEdit(course)
+    return
+  }
+  // 桌面 3-4 个重叠: 切换展开
+  if (expandedGroupId.value === course.groupId) {
+    // 已展开, 用户点击的是某一层 → 进入编辑
+    openEdit(course)
+  } else {
+    expandedGroupId.value = course.groupId
+  }
+}
+
+function selectFromList(course) {
+  mobileListGroup.value = null
+  openEdit(course)
+}
+
+function handleBackdropClick() {
+  // 点击空白区域收起展开/列表
+  expandedGroupId.value = null
+  mobileListGroup.value = null
 }
 
 async function saveCourse() {
@@ -500,21 +623,48 @@ onMounted(() => {
   loadData()
   document.addEventListener('visibilitychange', handleVisibilityChange)
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('click', handleWindowClick)
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
 })
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('click', handleWindowClick)
+  window.removeEventListener('resize', checkMobile)
 })
 
 function handleKeydown(e) {
-  if (e.key === 'Escape' && showModal.value) closeModal()
+  if (e.key === 'Escape') {
+    if (showModal.value) closeModal()
+    else if (expandedGroupId.value || mobileListGroup.value) {
+      expandedGroupId.value = null
+      mobileListGroup.value = null
+    }
+    return
+  }
+  if (e.key === 'Enter' && expandedGroupId.value && !showModal.value) {
+    // 展开状态下回车 = 编辑最上层卡
+    const top = placedCourses.value
+      .filter(c => c.groupId === expandedGroupId.value)
+      .sort((a, b) => b.stackIndex - a.stackIndex)[0]
+    if (top) openEdit(top)
+  }
 }
 
 function handleVisibilityChange() {
   if (document.visibilityState !== 'visible') return
   if (showModal.value) return
   loadData()
+}
+
+function handleWindowClick(e) {
+  // 点击非课程 bar 时收起展开/列表
+  if (!e.target.closest('.course-bar') && !e.target.closest('.overlap-list-item')) {
+    expandedGroupId.value = null
+    mobileListGroup.value = null
+  }
 }
 </script>
 
@@ -761,6 +911,64 @@ function handleVisibilityChange() {
   outline-offset: -2px;
 }
 
+/* ============ 30 分钟虚线参考层 ============ */
+.time-rules {
+  grid-column: 2 / span 7;
+  grid-row: 1 / span 31;
+  display: grid;
+  grid-template-rows: repeat(31, 24px);
+  pointer-events: none;
+  z-index: 0;
+}
+.time-rule {
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.06);
+}
+.time-rule.major {
+  border-bottom: 1px dashed rgba(0, 0, 0, 0.12);
+}
+
+/* ============ 重叠堆叠样式 ============ */
+.course-bar.is-stacked {
+  z-index: var(--stack-z);
+  transform: translateY(var(--stack-translate));
+  margin: 2px 4px;
+}
+.course-bar.is-stacked.stack-expanded {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+}
+.course-bar.is-stacked.stack-expanded:hover {
+  transform: translateY(calc(var(--stack-translate) - 3px)) scale(1.02);
+  z-index: calc(var(--stack-z) + 5);
+}
+.course-bar.is-stacked:hover {
+  z-index: calc(var(--stack-z) + 3);
+}
+
+/* 顶层卡微弱描边, 表明是主操作对象 */
+.course-bar.is-stacked[data-stack-top='true'] {
+  border-top-width: 2px;
+}
+
+.stack-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  background: var(--color-danger, #ff3b30);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(255, 59, 48, 0.4);
+  pointer-events: none;
+  letter-spacing: 0.3px;
+}
+
 .bar-bottom {
   display: flex;
   justify-content: space-between;
@@ -996,5 +1204,112 @@ function handleVisibilityChange() {
   .bar-name { font-size: 12px; }
   .bar-meta { font-size: 10px; }
   .swimlane-label { display: none; }
+}
+
+/* ============ 移动端重叠课程列表 ============ */
+.overlap-list-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.overlap-list {
+  background: white;
+  width: 100%;
+  max-width: 480px;
+  max-height: 70vh;
+  border-radius: 16px 16px 0 0;
+  padding: 16px 12px 20px;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.overlap-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 8px;
+}
+.overlap-list-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.overlap-list-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.overlap-list-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  margin: 6px 0;
+  border: none;
+  border-left: 4px solid;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.overlap-list-item:hover {
+  transform: translateX(2px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+.overlap-list-item:active {
+  transform: scale(0.98);
+}
+.overlap-list-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--c-fg, var(--color-text));
+  margin-bottom: 2px;
+}
+.overlap-list-meta {
+  font-size: 12px;
+  opacity: 0.85;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.overlap-list-meta .dot {
+  opacity: 0.5;
+}
+.overlap-list-students {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+/* 弹层进出场动画 */
+.overlap-list-enter-active,
+.overlap-list-leave-active {
+  transition: opacity 0.2s ease;
+}
+.overlap-list-enter-active .overlap-list,
+.overlap-list-leave-active .overlap-list {
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.overlap-list-enter-from,
+.overlap-list-leave-to {
+  opacity: 0;
+}
+.overlap-list-enter-from .overlap-list,
+.overlap-list-leave-to .overlap-list {
+  transform: translateY(40px);
 }
 </style>
