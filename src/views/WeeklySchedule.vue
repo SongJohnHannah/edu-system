@@ -52,33 +52,66 @@
           <div v-for="r in ROWS" :key="r" class="time-rule" :class="{ 'major': (r - 1) % 2 === 0 }"></div>
         </div>
 
-        <!-- 课程 bar -->
-        <TransitionGroup name="bar" tag="div" class="bars-layer">
+        <!-- 课程层 (单卡 + 重叠组) -->
+        <div class="bars-layer">
+        <!-- 单卡 (无重叠) -->
+        <div
+          v-for="c in singleCourses"
+          :key="c.id"
+          class="course-bar"
+          :class="{
+            'out-of-bounds': c.outOfBounds,
+            'is-past': c.isPast
+          }"
+          :style="{
+            '--c-bg': c.color.bg,
+            '--c-fg': c.color.fg,
+            '--c-border': c.color.border,
+            gridColumn: c.col + 1,
+            gridRow: `${c.startRow} / span ${c.rowSpan}`
+          }"
+          @click.stop="handleBarClick(c)"
+        >
+          <div class="bar-name">{{ c.name }}</div>
+          <div class="bar-meta">
+            {{ c.startTime }}–{{ c.endTime }}
+            <span v-if="c.outOfBounds" class="warn-icon" title="时间超出 07:30–22:30 范围">⚠</span>
+          </div>
+          <div class="bar-bottom">
+            <span class="bar-teacher">{{ c.teacherName || '未指定' }}</span>
+            <span class="bar-students">{{ c.studentCount }} 人</span>
+          </div>
+        </div>
+
+        <!-- 重叠组 (≥2 张时间重叠) -->
+        <div
+          v-for="grp in overlapGroups"
+          :key="grp.groupId"
+          class="overlap-group"
+          :class="{ 'is-collapsing': collapsingGroupId === grp.groupId }"
+          :style="{
+            gridColumn: grp.col + 1,
+            gridRow: `${grp.startRow} / span ${grp.rowSpan}`
+          }"
+          @click.stop="handleBarClick(grp.members[0])"
+        >
+          <span class="overlap-group-badge">+{{ grp.members.length }}</span>
           <div
-            v-for="(c, i) in placedCourses"
+            v-for="c in grp.members"
             :key="c.id"
-            class="course-bar"
+            class="course-bar is-stacked"
             :class="{
               'out-of-bounds': c.outOfBounds,
-              'has-overlap': c.overlap,
-              'is-stacked': c.stackSize > 1,
-              'stack-expanded': c.stackSize > 1 && expandedGroupId === c.groupId
+              'is-past': c.isPast
             }"
             :style="{
               '--c-bg': c.color.bg,
               '--c-fg': c.color.fg,
               '--c-border': c.color.border,
-              '--idx': i,
-              '--stack-idx': c.stackIndex,
-              '--stack-total': c.stackSize,
-              '--stack-translate': c.stackSize > 1
-                ? (expandedGroupId === c.groupId
-                    ? `${c.stackIndex * 28}px`
-                    : `${c.stackIndex * 22}px`)
-                : '0px',
-              '--stack-z': c.stackSize > 1 ? (c.stackIndex + 10) : 1,
-              gridColumn: c.col + 1,
-              gridRow: `${c.startRow} / span ${c.rowSpan}`
+              '--stack-translate': `${c.stackIndex * 16}px`,
+              '--stack-z': c.stackIndex + 10,
+              gridColumn: '1 / -1',
+              gridRow: `${c.startRow - grp.startRow + 1} / span ${c.rowSpan}`
             }"
             @click.stop="handleBarClick(c)"
           >
@@ -91,9 +124,9 @@
               <span class="bar-teacher">{{ c.teacherName || '未指定' }}</span>
               <span class="bar-students">{{ c.studentCount }} 人</span>
             </div>
-            <span v-if="c.stackSize > 1" class="stack-badge">+{{ c.stackSize }}</span>
           </div>
-        </TransitionGroup>
+        </div>
+        </div>
       </div>
     </div>
 
@@ -126,105 +159,94 @@
       </Transition>
     </Teleport>
 
-    <!-- 空状态 -->
+    <!-- 桌面端重叠课程居中弹框 -->
+    <Teleport to="body">
+      <Transition name="overlap-list">
+        <div v-if="desktopOverlapGroup" class="overlap-list-overlay desktop-pick" @click.self="closeDesktopOverlap">
+          <div class="overlap-list desktop-pick" @click.stop>
+            <div class="overlap-list-header">
+              <span class="overlap-list-title">{{ desktopOverlapGroup.length }} 个课程在此重叠</span>
+              <button class="overlap-list-close" @click="closeDesktopOverlap" aria-label="关闭">×</button>
+            </div>
+            <button
+              v-for="c in desktopOverlapGroup"
+              :key="c.id"
+              class="overlap-list-item"
+              :style="{ borderLeftColor: c.color.border, background: c.color.bg }"
+              @click="selectFromDesktopList(c)"
+            >
+              <div class="overlap-list-name">{{ c.name }}</div>
+              <div class="overlap-list-meta">
+                <span>{{ c.startTime }}–{{ c.endTime }}</span>
+                <span class="dot">·</span>
+                <span>{{ c.teacherName || '未指定' }}</span>
+              </div>
+              <div class="overlap-list-students">{{ c.studentCount }} 人 · {{ c.classroom || '未指定教室' }}</div>
+            </button>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
     <div v-if="placedCourses.length === 0" class="empty-state">
       <p>本周还没有任何课程</p>
       <button class="btn btn-primary" @click="openCreate">+ 创建第一门课程</button>
     </div>
 
-    <!-- 编辑弹窗 -->
     <Teleport to="body">
       <Transition name="modal">
-        <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
-          <div class="modal">
-            <h2 class="modal-title">{{ editingCourse ? '编辑课程' : '创建课程' }}</h2>
-            <form @submit.prevent="debouncedSave" class="modal-form">
-              <div class="modal-body">
-              <div class="form-group">
-                <label>课程名称 *</label>
-                <input type="text" class="input" v-model="form.name" required placeholder="如：三年级数学课" />
-              </div>
-              <div class="form-group">
-                <label>授课教师 *</label>
-                <SearchSelect
-                  v-model="form.teacherId"
-                  :options="teachers.map(t => ({ value: t.id, label: t.name }))"
-                  placeholder="搜索或选择教师"
-                />
-              </div>
-              <div class="form-group">
-                <label>上课日期 *</label>
-                <SearchSelect
-                  v-model="form.weekday"
-                  :options="weekdayOptions"
-                  placeholder="选择星期"
-                  :searchable="false"
-                />
-              </div>
-              <div class="time-row">
-                <div class="form-group">
-                  <label>开始时间 *</label>
-                  <SearchSelect
-                    v-model="form.startTime"
-                    :options="timeOptions"
-                    placeholder="选择开始时间"
-                    :searchable="false"
-                  />
-                </div>
-                <div class="form-group">
-                  <label>结束时间 *</label>
-                  <SearchSelect
-                    v-model="form.endTime"
-                    :options="timeOptions"
-                    placeholder="选择结束时间"
-                    :searchable="false"
-                  />
+        <div v-if="showHistoryDrawer" class="history-overlay" @click.self="closeHistoryDrawer">
+          <div class="history-drawer">
+            <div class="history-header">
+              <h2 class="history-title">📜 {{ historyCourse?.name }} · 历史时间线</h2>
+              <button class="history-close" @click="closeHistoryDrawer" aria-label="关闭">×</button>
+            </div>
+            <div class="history-body">
+              <div v-if="historyItems.length === 0" class="history-empty">暂无变更记录</div>
+              <div v-else>
+                <div
+                  v-for="(item, idx) in historyItems"
+                  :key="idx"
+                  class="history-item"
+                  :class="['status-' + classifyTimelineItem(item).status]"
+                >
+                  <div class="history-item-head">
+                    <span class="history-date">{{ item.effectiveFrom }}</span>
+                    <span v-if="item.validUntil" class="history-range">~ {{ item.validUntil }}</span>
+                    <span class="history-status">{{ classifyTimelineItem(item).label }}</span>
+                  </div>
+                  <div class="history-item-body">
+                    <div><strong>教师：</strong>{{ item.teacherName || '未知' }}</div>
+                    <div><strong>学生：</strong>{{ getStudentNames(item.studentIds) }}</div>
+                    <div v-if="item.classroom"><strong>教室：</strong>{{ item.classroom }}</div>
+                  </div>
                 </div>
               </div>
-              <div class="form-row">
-                <div class="form-group">
-                  <label>每次课时</label>
-                  <input type="number" class="input" v-model.number="form.hoursPerClass" min="0.5" step="0.5" />
-                </div>
-                <div class="form-group">
-                  <label>教室</label>
-                  <input type="text" class="input" v-model="form.classroom" placeholder="如：A101" />
-                </div>
-              </div>
-              <div class="form-group">
-                <label>上课学生 *</label>
-                <input type="text" class="input student-search" v-model="studentSearchText" placeholder="搜索学生姓名..." />
-                <div class="student-select">
-                  <button type="button" class="student-btn" v-for="s in filteredStudents" :key="s.id"
-                    :class="{ selected: form.studentIds.includes(s.id) }"
-                    @click="toggleStudent(s.id)">
-                    {{ s.name }}
-                  </button>
-                </div>
-                <div class="student-summary" v-if="form.studentIds.length > 0">
-                  已选 {{ form.studentIds.length }} 名学生
-                </div>
-              </div>
-              </div>
-              <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-                <button type="submit" class="btn btn-primary" :disabled="submitting">
-                  {{ submitting ? '保存中...' : '保存' }}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
         </div>
       </Transition>
     </Teleport>
+
+    <!-- 编辑/只读弹窗（共用 CourseEditModal） -->
+    <CourseEditModal
+      :open="showModal"
+      :mode="modalMode"
+      :course="editingCourse"
+      :effective-date="editEffectiveDate"
+      :teachers="teachers"
+      :students="students"
+      :submitting="submitting"
+      @submit="onModalSubmit"
+      @cancel="closeModal"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getCourses, addCourse, updateCourse, getTeachers, getStudents } from '../utils/storage'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { getCourses, getEffectiveCourses, addCourse, updateCourse, getTeachers, getStudents, getCourseHistory } from '../utils/storage'
 import { useToast } from '../composables/useToast'
-import SearchSelect from '../components/SearchSelect.vue'
+import CourseEditModal from '../components/CourseEditModal.vue'
 
 const toast = useToast()
 
@@ -264,25 +286,20 @@ const weekOffset = ref(0)            // 0=本周, -1=上周, 1=下周
 
 const showModal = ref(false)
 const editingCourse = ref(null)
-const studentSearchText = ref('')
+const editEffectiveDate = ref(null)
+const modalMode = ref('edit')           // 'edit' | 'create' | 'readonly'
 const submitting = ref(false)
 
-// 重叠课程交互
-const expandedGroupId = ref(null)        // 桌面: 哪个重叠组已展开
-const mobileListGroup = ref(null)        // 移动: 哪个重叠组弹出列表
-const isMobile = ref(false)               // 是否移动端
-const STACK_MAX = 4                       // 最多展示 4 张重叠卡
+// 历史抽屉
+const showHistoryDrawer = ref(false)
+const historyCourse = ref(null)
+const historyItems = ref([])
 
-const form = ref({
-  name: '',
-  teacherId: '',
-  weekday: 1,
-  startTime: '09:00',
-  endTime: '11:00',
-  hoursPerClass: 1,
-  classroom: '',
-  studentIds: []
-})
+// 重叠课程交互
+const desktopOverlapGroup = ref(null)      // 桌面居中 modal 显示哪个重叠组 (数组)
+const mobileListGroup = ref(null)          // 移动: 哪个重叠组弹出列表
+const collapsingGroupId = ref(null)        // 触发归位动画的组 id
+const isMobile = ref(false)                // 是否移动端
 
 // ============================ 时间工具 ============================
 function parseHM(time) {
@@ -339,7 +356,8 @@ const weekDays = computed(() => {
       day: d.getDate(),
       month: d.getMonth() + 1,
       isToday: dateStr === todayStr,
-      date: d
+      date: d,
+      dateStr
     })
   }
   return result
@@ -354,8 +372,25 @@ const weekRangeLabel = computed(() => {
   return `${start.month}月${start.day}日 – ${end.month}月${end.day}日`
 })
 
+const isViewingPast = computed(() => weekOffset.value < 0)
+
 function formatDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+// col → DB weekday（col 1 = Sunday = weekday 7, col 2 = Monday = weekday 1, ...）
+function colToWeekday(col) {
+  return col === 1 ? 7 : col - 1
+}
+
+// 判断该 slot 是否属于过去：(weekDays[col-1].date + endTime) < now
+function isSlotPast(col, endTime) {
+  const day = weekDays.value[col - 1]
+  if (!day) return false
+  const slotEnd = new Date(day.date)
+  const [h, m] = endTime.split(':').map(Number)
+  slotEnd.setHours(h, m, 0, 0)
+  return slotEnd < new Date()
 }
 
 // ============================ 课程定位 ============================
@@ -377,6 +412,7 @@ const placedCourses = computed(() => {
       studentCount: (c.studentIds || []).length,
       teacherName: c.teacherName || getTeacherNameById(c.teacherId),
       outOfBounds,
+      isPast: isSlotPast(col, c.endTime),
       overlap: false,
       groupId: null,
       stackIndex: 0,
@@ -405,12 +441,12 @@ const placedCourses = computed(() => {
     }
     for (const c of colCourses) {
       const cEnd = c.startRow + c.rowSpan
-      if (c.startRow <= groupEndRow) {
-        // 与当前组重叠或首尾相接, 归入同一扑克牌组
+      if (c.startRow < groupEndRow) {
+        // 与当前组时间重叠, 归入同一重叠组
         groupMembers.push(c)
         groupEndRow = Math.max(groupEndRow, cEnd)
       } else {
-        // 不相邻, 开始新的组
+        // 首尾相接或不相邻, 开始新的组
         flushGroup()
         groupId = `${col}-${c.startRow}-${cEnd}`
         groupMembers = [c]
@@ -422,77 +458,116 @@ const placedCourses = computed(() => {
   return placed
 })
 
+// 单卡 (stackSize <= 1): 直接渲染
+const singleCourses = computed(() => placedCourses.value.filter(c => c.stackSize <= 1))
+
+// 重叠组: 按 groupId 聚合, 每个组渲染为一个 .overlap-group 虚线包裹框
+const overlapGroups = computed(() => {
+  const map = new Map()
+  for (const c of placedCourses.value) {
+    if (c.stackSize <= 1) continue
+    if (!map.has(c.groupId)) map.set(c.groupId, [])
+    map.get(c.groupId).push(c)
+  }
+  return Array.from(map.values()).map(members => {
+    members.sort((a, b) => a.stackIndex - b.stackIndex)
+    const startRow = Math.min(...members.map(m => m.startRow))
+    const endRow = Math.max(...members.map(m => m.startRow + m.rowSpan))
+    return {
+      groupId: members[0].groupId,
+      members,
+      startRow,
+      rowSpan: endRow - startRow,
+      col: members[0].col
+    }
+  })
+})
+
 function getTeacherNameById(id) {
   const t = teachers.value.find(t => t.id === id)
   return t ? t.name : ''
 }
 
-// ============================ 表单选项 ============================
-const weekdayMap = { 1: '星期一', 2: '星期二', 3: '星期三', 4: '星期四', 5: '星期五', 6: '星期六', 7: '星期日' }
-const weekdayOptions = Object.entries(weekdayMap).map(([v, l]) => ({ value: Number(v), label: l }))
-
-const timeOptions = []
-for (let h = 6; h <= 23; h++) {
-  for (let m = 0; m < 60; m += 30) {
-    if (h === 23 && m > 0) continue
-    const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    timeOptions.push({ value: time, label: time })
-  }
-}
-
-const filteredStudents = computed(() => {
-  if (!studentSearchText.value) return students.value.filter(s => s.status === 'active')
-  const search = studentSearchText.value.toLowerCase()
-  return students.value.filter(s =>
-    s.name.toLowerCase().includes(search) && s.status === 'active'
-  )
-})
-
-function toggleStudent(id) {
-  const index = form.value.studentIds.indexOf(id)
-  if (index === -1) form.value.studentIds.push(id)
-  else form.value.studentIds.splice(index, 1)
+function getStudentNames(studentIds) {
+  return (studentIds || []).map(id => {
+    const s = students.value.find(s => s.id === id)
+    return s ? s.name : ''
+  }).filter(Boolean).join('、') || '无'
 }
 
 // ============================ 弹窗 ============================
 function openEdit(course) {
   editingCourse.value = course
-  form.value = {
-    name: course.name,
-    teacherId: course.teacherId,
-    weekday: course.weekday,
-    startTime: course.startTime,
-    endTime: course.endTime,
-    hoursPerClass: course.hoursPerClass ?? 1,
-    classroom: course.classroom || '',
-    studentIds: [...(course.studentIds || [])]
-  }
-  studentSearchText.value = ''
+  // 未来 occurrence 默认为当天/下一节课日期
+  editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  modalMode.value = 'edit'
+  showModal.value = true
+}
+
+function openReadonly(course) {
+  editingCourse.value = course
+  editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  modalMode.value = 'readonly'
   showModal.value = true
 }
 
 function openCreate() {
   editingCourse.value = null
-  form.value = {
-    name: '',
-    teacherId: teachers.value[0]?.id || '',
-    weekday: 1,
-    startTime: '09:00',
-    endTime: '11:00',
-    hoursPerClass: 1,
-    classroom: '',
-    studentIds: []
-  }
-  studentSearchText.value = ''
+  editEffectiveDate.value = null
+  modalMode.value = 'create'
   showModal.value = true
+}
+
+function nextFutureOccurrence(weekday, startTime) {
+  const now = new Date()
+  const targetDow = weekday === 7 ? 0 : weekday
+  const curDow = now.getDay()
+  let diff = (targetDow - curDow + 7) % 7
+  if (diff === 0 && startTime) {
+    const [h, m] = startTime.split(':').map(Number)
+    if (h * 60 + m <= now.getHours() * 60 + now.getMinutes()) diff = 7
+  }
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff)
+  return d
 }
 
 function closeModal() {
   showModal.value = false
   editingCourse.value = null
-  studentSearchText.value = ''
+  editEffectiveDate.value = null
   submitting.value = false
   mobileListGroup.value = null
+}
+
+// ============================ 历史抽屉 ============================
+async function openHistoryDrawer(course) {
+  historyCourse.value = course
+  showHistoryDrawer.value = true
+  historyItems.value = []
+  try {
+    const items = await getCourseHistory(course.id)
+    historyItems.value = items || []
+  } catch (err) {
+    toast.error('加载历史失败：' + (err.message || ''))
+    historyItems.value = []
+  }
+}
+
+function closeHistoryDrawer() {
+  showHistoryDrawer.value = false
+  historyCourse.value = null
+  historyItems.value = []
+}
+
+function classifyTimelineItem(item) {
+  if (item.kind === 'history') return { status: 'past', label: '已替换' }
+  const today = formatDate(new Date())
+  if (item.validUntil) {
+    if (item.effectiveFrom >= today) return { status: 'pending-window', label: '待生效（仅本节）' }
+    return { status: 'past-window', label: '历史窗口' }
+  }
+  if (item.effectiveFrom > today) return { status: 'pending', label: '待生效' }
+  return { status: 'current', label: '当前生效' }
 }
 
 // ============================ 重叠课程交互 ============================
@@ -501,102 +576,84 @@ function checkMobile() {
 }
 
 function handleBarClick(course) {
-  // 单卡: 直接编辑
-  if (course.stackSize <= 1) {
-    expandedGroupId.value = null
-    openEdit(course)
-    return
-  }
-  // 移动端: 任何重叠/相连 → 弹列表
+  // 移动端: 弹底部 sheet
   if (isMobile.value) {
     mobileListGroup.value = placedCourses.value
       .filter(c => c.groupId === course.groupId)
       .sort((a, b) => a.stackIndex - b.stackIndex)
     return
   }
-  // 桌面: 扑克牌 fan-out (≥2 张都展开)
-  if (expandedGroupId.value === course.groupId) {
-    // 已展开, 用户点击的是某一层 → 进入编辑
+  // 桌面: 单卡 → 直接编辑; 重叠组 → 弹居中 modal + 触发归位动画
+  if (course.stackSize <= 1) {
+    if (course.isPast) {
+      openReadonly(course)
+      openHistoryDrawer(course)
+      return
+    }
     openEdit(course)
-  } else {
-    expandedGroupId.value = course.groupId
+    return
   }
+  collapsingGroupId.value = course.groupId
+  desktopOverlapGroup.value = placedCourses.value
+    .filter(c => c.groupId === course.groupId)
+    .sort((a, b) => a.stackIndex - b.stackIndex)
+}
+
+function selectFromDesktopList(course) {
+  desktopOverlapGroup.value = null
+  setTimeout(() => {
+    collapsingGroupId.value = null
+    if (course.isPast) {
+      openReadonly(course)
+      openHistoryDrawer(course)
+    } else {
+      openEdit(course)
+    }
+  }, 220)
+}
+
+function closeDesktopOverlap() {
+  desktopOverlapGroup.value = null
+  collapsingGroupId.value = null
 }
 
 function selectFromList(course) {
   mobileListGroup.value = null
+  if (course.isPast) {
+    openReadonly(course)
+    openHistoryDrawer(course)
+    return
+  }
   openEdit(course)
 }
 
 function handleBackdropClick() {
-  // 点击空白区域收起展开/列表
-  expandedGroupId.value = null
+  desktopOverlapGroup.value = null
   mobileListGroup.value = null
+  collapsingGroupId.value = null
 }
 
-async function saveCourse() {
+async function onModalSubmit(payload) {
   if (submitting.value) return
-
-  if (!form.value.name.trim()) {
-    toast.error('请输入课程名称')
-    return
-  }
-  if (!form.value.teacherId) {
-    toast.error('请选择授课教师')
-    return
-  }
-  if (!form.value.studentIds || form.value.studentIds.length === 0) {
-    toast.error('请至少选择一名学生')
-    return
-  }
-  if (form.value.startTime && form.value.endTime && form.value.startTime >= form.value.endTime) {
-    toast.error('结束时间必须晚于开始时间')
-    return
-  }
-  const hours = Number(form.value.hoursPerClass)
-  if (!Number.isFinite(hours) || hours < 0.5) {
-    toast.error('每次课时不能小于 0.5')
-    return
-  }
-  form.value.hoursPerClass = hours
 
   submitting.value = true
   try {
     if (editingCourse.value) {
-      courses.value = await updateCourse(editingCourse.value.id, form.value)
+      courses.value = await updateCourse(editingCourse.value.id, payload)
       toast.success('课程已更新')
     } else {
-      courses.value = await addCourse(form.value)
+      courses.value = await addCourse(payload)
       toast.success('课程已创建')
     }
     closeModal()
+    // 编辑完成后重新加载，确保当周展示新值
+    await loadData()
   } catch (err) {
     toast.error(err.message || '保存失败')
   } finally {
     submitting.value = false
   }
 }
-
-// 防抖保存：300ms 内多次点击只触发一次真正的 save
-const debouncedSave = (() => {
-  let timer = null
-  let lastRun = 0
-  return () => {
-    if (timer) return
-    const now = Date.now()
-    const elapsed = now - lastRun
-    if (elapsed < 300) {
-      timer = setTimeout(() => {
-        timer = null
-        lastRun = Date.now()
-        saveCourse()
-      }, 300 - elapsed)
-      return
-    }
-    lastRun = now
-    saveCourse()
-  }
-})()
 
 // ============================ 周导航 ============================
 function prevWeek() { weekOffset.value-- }
@@ -605,13 +662,33 @@ function goToday() { weekOffset.value = 0 }
 
 // ============================ 数据加载 ============================
 async function loadData() {
-  const [c, t, s] = await Promise.all([
-    getCourses(), getTeachers(), getStudents()
+  const [t, s] = await Promise.all([
+    getTeachers(), getStudents()
   ])
-  courses.value = c || []
   teachers.value = t || []
   students.value = s || []
+
+  // 过去周调 effective endpoint；本周/未来周调 courses（更快）
+  if (isViewingPast.value) {
+    try {
+      const ws = formatDate(weekStart.value)
+      courses.value = (await getEffectiveCourses(ws)) || []
+      return
+    } catch (err) {
+      toast.error('加载历史课程失败：' + (err.message || ''))
+      courses.value = []
+      return
+    }
+  }
+  try {
+    courses.value = (await getCourses()) || []
+  } catch (err) {
+    toast.error('加载课程失败：' + (err.message || ''))
+    courses.value = []
+  }
 }
+
+watch(weekOffset, () => { loadData() })
 
 onMounted(() => {
   loadData()
@@ -632,18 +709,13 @@ onUnmounted(() => {
 function handleKeydown(e) {
   if (e.key === 'Escape') {
     if (showModal.value) closeModal()
-    else if (expandedGroupId.value || mobileListGroup.value) {
-      expandedGroupId.value = null
+    else if (showHistoryDrawer.value) closeHistoryDrawer()
+    else if (desktopOverlapGroup.value || mobileListGroup.value) {
+      desktopOverlapGroup.value = null
       mobileListGroup.value = null
+      collapsingGroupId.value = null
     }
     return
-  }
-  if (e.key === 'Enter' && expandedGroupId.value && !showModal.value) {
-    // 展开状态下回车 = 编辑最上层卡
-    const top = placedCourses.value
-      .filter(c => c.groupId === expandedGroupId.value)
-      .sort((a, b) => b.stackIndex - a.stackIndex)[0]
-    if (top) openEdit(top)
   }
 }
 
@@ -655,9 +727,10 @@ function handleVisibilityChange() {
 
 function handleWindowClick(e) {
   // 点击非课程 bar 时收起展开/列表
-  if (!e.target.closest('.course-bar') && !e.target.closest('.overlap-list-item')) {
-    expandedGroupId.value = null
+  if (!e.target.closest('.course-bar') && !e.target.closest('.overlap-group') && !e.target.closest('.overlap-list-item') && !e.target.closest('.history-drawer')) {
+    desktopOverlapGroup.value = null
     mobileListGroup.value = null
+    collapsingGroupId.value = null
   }
 }
 </script>
@@ -900,6 +973,19 @@ function handleWindowClick(e) {
   border-color: var(--color-danger);
 }
 
+.course-bar.is-past {
+  opacity: 0.55;
+  filter: grayscale(60%);
+  border-color: rgba(0, 0, 0, 0.2);
+  border-left-color: rgba(0, 0, 0, 0.25);
+  cursor: help;
+}
+
+.course-bar.is-past:hover {
+  opacity: 0.85;
+  filter: grayscale(30%);
+}
+
 .course-bar.has-overlap {
   outline: 2px dashed var(--color-danger);
   outline-offset: -2px;
@@ -925,42 +1011,56 @@ function handleWindowClick(e) {
 .course-bar.is-stacked {
   z-index: var(--stack-z);
   transform: translateY(var(--stack-translate));
-}
-.course-bar.is-stacked.stack-expanded {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
-  overflow: visible;
-  min-height: 96px;
-}
-.course-bar.is-stacked.stack-expanded:hover {
-  transform: translateY(calc(var(--stack-translate) - 3px)) scale(1.02);
-  z-index: calc(var(--stack-z) + 5);
+  transition: transform 0.25s ease, box-shadow 0.2s ease;
 }
 .course-bar.is-stacked:hover {
   z-index: calc(var(--stack-z) + 3);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
 
-/* 顶层卡微弱描边, 表明是主操作对象 */
-.course-bar.is-stacked[data-stack-top='true'] {
-  border-top-width: 2px;
+/* ============ 重叠组虚线包裹框 ============ */
+.overlap-group {
+  position: relative;
+  pointer-events: auto;
+  border: 2px dashed rgba(0, 0, 0, 0.55);
+  border-radius: 12px;
+  margin: 0 4px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: 24px;
+  z-index: 5;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.overlap-group:hover {
+  border-color: rgba(0, 113, 227, 0.85);
+  background: rgba(0, 113, 227, 0.06);
+}
+.overlap-group.is-collapsing {
+  background: rgba(255, 255, 255, 0.7);
 }
 
-.stack-badge {
+.overlap-group-badge {
   position: absolute;
-  top: -7px;
-  right: -7px;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 11px;
-  background: var(--color-danger, #ff3b30);
-  color: white;
-  font-size: 11px;
+  top: -11px;
+  right: -10px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: 13px;
+  background: white;
+  color: #b31a3f;
+  border: 2px solid #ff2d55;
+  font-size: 12px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 6px rgba(255, 59, 48, 0.4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
   pointer-events: none;
+  z-index: 6;
   letter-spacing: 0.3px;
 }
 
@@ -1015,155 +1115,131 @@ function handleWindowClick(e) {
   font-size: 15px;
 }
 
-/* ============ 弹窗 ============ */
-.modal-overlay {
+/* ============ 历史抽屉 ============ */
+.history-overlay {
   position: fixed;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1001;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.history-drawer {
+  background: white;
+  width: 100%;
+  max-width: 440px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+}
+
+.history-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 24px 16px;
-  overflow-y: auto;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
-.modal {
-  background: white;
-  border-radius: var(--radius-lg);
-  padding: 0;
-  width: 100%;
-  max-width: 560px;
-  max-height: 90vh;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.modal-title {
-  font-size: 22px;
+.history-title {
+  font-size: 16px;
   font-weight: 600;
-  padding: 24px 24px 12px;
   margin: 0;
-  flex-shrink: 0;
-}
-
-.modal-form {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-.modal-body {
-  padding: 12px 24px 24px;
-  overflow-y: auto;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.form-group {
-  margin-bottom: 18px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
   color: var(--color-text);
-  margin-bottom: 6px;
 }
 
-.input {
-  width: 100%;
-  padding: 10px 12px;
-  font-size: 14px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: white;
-  transition: border-color 0.2s;
-}
-
-.input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-}
-
-.form-row,
-.time-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.student-search {
-  margin-bottom: 8px;
-}
-
-.student-select {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  max-height: 180px;
-  overflow-y: auto;
-  padding: 12px;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-sm);
-}
-
-.student-btn {
-  padding: 6px 14px;
-  border: 2px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: white;
-  font-size: 13px;
-  color: var(--color-text);
+.history-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--color-text-secondary);
   cursor: pointer;
-  transition: all 0.2s;
 }
 
-.student-btn:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
+.history-body {
+  padding: 16px 24px 24px;
+  overflow-y: auto;
+  flex: 1;
 }
 
-.student-btn.selected {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: white;
+.history-empty {
+  text-align: center;
+  color: var(--color-text-secondary);
+  padding: 32px 0;
+  font-size: 14px;
 }
 
-.student-summary {
-  font-size: 12px;
-  color: var(--color-primary);
-  margin-top: 8px;
-  font-weight: 500;
+.history-item {
+  border-left: 3px solid var(--color-border);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--color-bg-secondary);
+  border-radius: 6px;
 }
 
-.modal-actions {
+.history-item.status-current {
+  border-left-color: var(--color-primary);
+  background: rgba(0, 113, 227, 0.06);
+}
+
+.history-item.status-pending,
+.history-item.status-pending-window {
+  border-left-color: var(--color-warning);
+  background: rgba(255, 149, 0, 0.06);
+}
+
+.history-item.status-past,
+.history-item.status-past-window {
+  border-left-color: rgba(0, 0, 0, 0.25);
+  opacity: 0.85;
+}
+
+.history-item-head {
   display: flex;
-  gap: 12px;
-  justify-content: flex-end;
-  padding: 16px 24px;
-  margin-top: 0;
-  flex-shrink: 0;
-  background: white;
-  border-top: 1px solid var(--color-border);
-  position: sticky;
-  bottom: 0;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  flex-wrap: wrap;
 }
 
-/* 弹窗动画 */
-.modal-enter-active, .modal-leave-active { transition: opacity 0.25s ease; }
-.modal-enter-active .modal,
-.modal-leave-active .modal {
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+.history-date {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
 }
-.modal-enter-from, .modal-leave-to { opacity: 0; }
-.modal-enter-from .modal,
-.modal-leave-to .modal {
-  opacity: 0;
-  transform: translateY(32px) scale(0.94);
+
+.history-range {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.history-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-secondary);
+  margin-left: auto;
+}
+
+.history-item-body {
+  font-size: 12px;
+  color: var(--color-text);
+  line-height: 1.7;
+}
+
+.history-item-body strong {
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
 /* ============ 移动端 ============ */
@@ -1178,18 +1254,9 @@ function handleWindowClick(e) {
   .page-title { font-size: 24px; }
   .week-nav .btn { padding: 6px 10px; font-size: 13px; }
 
-  .modal-overlay { padding: 0; align-items: flex-end; }
-  .modal {
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    max-height: 92vh;
+  .history-drawer {
+    max-width: 100%;
   }
-  .modal-title { padding: 20px 16px 8px; }
-  .modal-body { padding: 8px 16px 20px; }
-  .modal-actions {
-    flex-direction: column;
-    padding: 14px 16px;
-  }
-  .modal-actions .btn { width: 100%; }
 }
 
 @media (max-width: 640px) {
@@ -1222,6 +1289,19 @@ function handleWindowClick(e) {
   box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* ============ 桌面端重叠课程居中 modal ============ */
+.overlap-list-overlay.desktop-pick {
+  align-items: center;
+}
+.overlap-list.desktop-pick {
+  border-radius: 16px;
+  max-height: 80vh;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.18);
+}
+@media (max-width: 1024px) {
+  .overlap-list-overlay.desktop-pick { display: none; }
 }
 .overlap-list-header {
   display: flex;
@@ -1306,5 +1386,9 @@ function handleWindowClick(e) {
 .overlap-list-enter-from .overlap-list,
 .overlap-list-leave-to .overlap-list {
   transform: translateY(40px);
+}
+.overlap-list-enter-from .overlap-list.desktop-pick,
+.overlap-list-leave-to .overlap-list.desktop-pick {
+  transform: translateY(32px) scale(0.94);
 }
 </style>
