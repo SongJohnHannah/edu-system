@@ -135,15 +135,6 @@
         </svg>
         <span>点名</span>
       </router-link>
-      <router-link to="/calendar" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-          <line x1="16" y1="2" x2="16" y2="6"/>
-          <line x1="8" y1="2" x2="8" y2="6"/>
-          <line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-        <span>日历</span>
-      </router-link>
       <a class="tab-item" :class="{ 'tab-active': showMoreMenu }" @click.prevent="showMoreMenu = !showMoreMenu">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
@@ -170,6 +161,15 @@
           </svg>
           <span>教师统计</span>
         </router-link>
+        <router-link to="/calendar" class="more-item" @click="showMoreMenu = false">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <span>日历</span>
+        </router-link>
         <router-link to="/handovers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -178,6 +178,13 @@
             <line x1="23" y1="11" x2="17" y2="11"/>
           </svg>
           <span>交接记录</span>
+        </router-link>
+        <router-link to="/profile" class="more-item" @click="showMoreMenu = false" v-if="useApi && authUser">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+          <span>个人资料</span>
         </router-link>
       </div>
     </div>
