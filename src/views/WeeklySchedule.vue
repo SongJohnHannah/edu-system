@@ -548,7 +548,7 @@ async function openHistoryDrawer(course) {
     const items = await getCourseHistory(course.id)
     historyItems.value = items || []
   } catch (err) {
-    toast.error('加载历史失败：' + (err.message || ''))
+    toast.error('加载历史失败：' + (err.message || '网络异常，请稍后重试'))
     historyItems.value = []
   }
 }
