@@ -112,19 +112,28 @@
         </svg>
         <span>学生</span>
       </router-link>
+      <router-link to="/courses" class="tab-item" active-class="tab-active">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        <span>课程安排</span>
+      </router-link>
+      <router-link to="/weekly-schedule" class="tab-item" active-class="tab-active">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+          <line x1="3" y1="10" x2="21" y2="10"/>
+          <line x1="8" y1="2" x2="8" y2="6"/>
+          <line x1="16" y1="2" x2="16" y2="6"/>
+        </svg>
+        <span>周排课</span>
+      </router-link>
       <router-link to="/attendance" class="tab-item" active-class="tab-active">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M9 11l3 3L22 4"/>
           <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
         </svg>
         <span>点名</span>
-      </router-link>
-      <router-link to="/courses" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-        <span>课程</span>
       </router-link>
       <router-link to="/calendar" class="tab-item" active-class="tab-active">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -146,15 +155,6 @@
     <!-- 移动端更多菜单 -->
     <div class="mobile-more-overlay" v-if="showMoreMenu" @click="showMoreMenu = false">
       <div class="mobile-more-menu" @click.stop>
-        <router-link to="/weekly-schedule" class="more-item" @click="showMoreMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-          </svg>
-          <span>周排课</span>
-        </router-link>
         <router-link to="/teachers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -169,13 +169,6 @@
             <line x1="6" y1="20" x2="6" y2="14"/>
           </svg>
           <span>教师统计</span>
-        </router-link>
-        <router-link to="/profile" class="more-item" @click="showMoreMenu = false" v-if="useApi && authUser">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          <span>个人资料</span>
         </router-link>
         <router-link to="/handovers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
