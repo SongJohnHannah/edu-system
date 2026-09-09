@@ -11,9 +11,6 @@
       <p>请先创建课程后再进行点名</p>
       <router-link to="/courses" class="btn btn-primary" style="margin-top: 12px">去创建课程</router-link>
     </div>
-    <div class="tip" v-else-if="filteredCourses.length === 0">
-      <p>当前选择的星期几没有课程，请切换到有课程的日期</p>
-    </div>
 
     <template v-else>
       <div class="select-course">
@@ -174,11 +171,22 @@
         <button v-if="hasMoreRecords" class="btn btn-secondary load-more-btn" @click="loadMoreRecords">加载更多记录</button>
       </div>
     </template>
+
+    <!-- 空状态弹窗:当前 weekday 没课时提示,picker 仍可操作 -->
+    <div class="modal-overlay" v-if="showEmptyModal" @click.self="showEmptyModal = false">
+      <div class="modal modal-sm">
+        <h2 class="modal-title">无法点名</h2>
+        <p class="empty-modal-body">当前所选日期（{{ weekdayMap[selectedWeekday] }}）没有课程，请选择其他日期或前往课程管理页面创建。</p>
+        <div class="modal-actions">
+          <button class="btn btn-primary" @click="showEmptyModal = false">我知道了</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { getCourses, getStudents, getTeachers, getAttendance, getAttendancePage, addAttendance, removeStudentsFromRecord } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 import SearchSelect from '../components/SearchSelect.vue'
@@ -255,6 +263,7 @@ const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
 const isDuplicateAttendance = ref(false)
+const showEmptyModal = ref(false)
 
 // 选择性删除相关
 const showDeleteModal = ref(false)
@@ -360,6 +369,10 @@ const sortedCourseStudents = computed(() => {
 const filteredCourses = computed(() => {
   return courses.value.filter(c => c.weekday === selectedWeekday.value)
 })
+
+watch(filteredCourses, (list) => {
+  showEmptyModal.value = list.length === 0 && courses.value.length > 0
+}, { immediate: true })
 
 function onWeekdayChange() {
   selectedCourseId.value = ''
@@ -915,6 +928,13 @@ async function confirmDeleteStudents() {
   font-size: 14px;
   color: var(--color-text-secondary);
   margin-bottom: 16px;
+}
+
+.empty-modal-body {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  margin-bottom: 24px;
+  line-height: 1.6;
 }
 
 .delete-student-list {
