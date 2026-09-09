@@ -576,15 +576,13 @@ function checkMobile() {
 }
 
 function handleBarClick(course) {
-  // 移动端: 弹底部 sheet
-  if (isMobile.value) {
-    mobileListGroup.value = placedCourses.value
-      .filter(c => c.groupId === course.groupId)
-      .sort((a, b) => a.stackIndex - b.stackIndex)
-    return
-  }
-  // 桌面: 单卡 → 直接编辑; 重叠组 → 弹居中 modal + 触发归位动画
+  // 单卡 (无论移动/桌面) 都走直接编辑/只读
   if (course.stackSize <= 1) {
+    if (isMobile.value) {
+      if (course.isPast) openReadonly(course)
+      else openEdit(course)
+      return
+    }
     if (course.isPast) {
       openReadonly(course)
       openHistoryDrawer(course)
@@ -593,10 +591,16 @@ function handleBarClick(course) {
     openEdit(course)
     return
   }
-  collapsingGroupId.value = course.groupId
-  desktopOverlapGroup.value = placedCourses.value
-    .filter(c => c.groupId === course.groupId)
+  // 重叠组: 移动端弹底部 sheet, 桌面弹居中 modal
+  const groupMembers = placedCourses.value
+    .filter(c => c.groupId === course.groupId && c.stackSize > 1)
     .sort((a, b) => a.stackIndex - b.stackIndex)
+  if (isMobile.value) {
+    mobileListGroup.value = groupMembers
+  } else {
+    collapsingGroupId.value = course.groupId
+    desktopOverlapGroup.value = groupMembers
+  }
 }
 
 function selectFromDesktopList(course) {
