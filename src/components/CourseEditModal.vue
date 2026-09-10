@@ -9,10 +9,16 @@
 
           <form @submit.prevent="onSubmit" class="modal-form">
             <div class="modal-body">
-              <!-- 生效日期提示（create 时隐藏） -->
-              <div v-if="effectiveDate && mode !== 'create'" class="effective-banner">
-                <span class="effective-label">生效日期</span>
-                <span class="effective-date">{{ formatEffectiveDate }}</span>
+              <!-- 生效日期（edit 时可选择；create 时隐藏） -->
+              <div v-if="mode !== 'create'" class="effective-banner">
+                <span v-if="mode === 'edit'" class="effective-label">生效日期</span>
+                <span v-else class="effective-label">生效日期</span>
+                <CalendarPicker
+                  v-if="mode === 'edit'"
+                  v-model="editableEffectiveDate"
+                  :min="todayStr"
+                />
+                <span v-else class="effective-date">{{ formatEffectiveDate }}</span>
                 <span v-if="mode === 'edit'" class="effective-weekday">{{ weekdayName }}</span>
               </div>
 
@@ -142,6 +148,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import SearchSelect from './SearchSelect.vue'
+import CalendarPicker from './CalendarPicker.vue'
 
 const props = defineProps({
   open: Boolean,
@@ -187,6 +194,14 @@ const studentSearchText = ref('')
 
 const readonly = computed(() => props.mode === 'readonly')
 
+// 用户在 modal 里实际选择的生效日期（YYYY-MM-DD），edit 模式可改
+const editableEffectiveDate = ref('')
+
+const todayStr = computed(() => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})
+
 // 本周临时行的简要描述，例如 "周五 09:00–11:00"
 const existingTempSummary = computed(() => {
   const t = props.existingTemp
@@ -206,8 +221,9 @@ const formatEffectiveDate = computed(() => {
 })
 
 const weekdayName = computed(() => {
-  if (!props.effectiveDate) return ''
-  const d = typeof props.effectiveDate === 'string' ? new Date(props.effectiveDate + 'T00:00:00') : props.effectiveDate
+  const dateStr = editableEffectiveDate.value || formatEffectiveDate.value
+  if (!dateStr) return ''
+  const d = new Date(dateStr + 'T00:00:00')
   return weekdayMap[d.getDay() === 0 ? 7 : d.getDay()] || ''
 })
 
@@ -253,6 +269,8 @@ function reset() {
   // 默认状态自动反查：若课程已有本周临时行，默认"仅本周临时"勾上；否则 cascading
   applyTemp.value = !!props.existingTemp
   studentSearchText.value = ''
+  // 生效日期初始化为父组件传入的值（edit 时用户可改；readonly 时锁定）
+  editableEffectiveDate.value = formatEffectiveDate.value || ''
 }
 
 watch(() => props.open, (val) => {
@@ -265,12 +283,19 @@ watch(() => props.course, () => {
 
 function onSubmit() {
   if (readonly.value) return
+  // 防御：用户手动清空或选了今天之前的日期
+  const eff = editableEffectiveDate.value || formatEffectiveDate.value
+  if (!eff) return
+  if (eff < todayStr.value) {
+    alert('生效日期不能早于今天')
+    return
+  }
   const payload = {
     ...form.value,
     hoursPerClass: Number(form.value.hoursPerClass) || 1
   }
-  if (props.mode === 'edit' && props.effectiveDate) {
-    payload.effectiveFrom = formatEffectiveDate.value
+  if (props.mode === 'edit') {
+    payload.effectiveFrom = eff
     payload.applyTemp = !!applyTemp.value
     payload.cancelTemp = false
   }
@@ -279,8 +304,10 @@ function onSubmit() {
 
 function onCancelTemp() {
   if (readonly.value) return
+  const eff = editableEffectiveDate.value || formatEffectiveDate.value
+  if (!eff) return
   const payload = {
-    effectiveFrom: formatEffectiveDate.value,
+    effectiveFrom: eff,
     cancelTemp: true
   }
   emit('submit', payload)
