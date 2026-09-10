@@ -89,6 +89,19 @@ export async function getCourses() {
   return api.get('/courses')
 }
 
+export async function getEffectiveCourses(weekStart) {
+  const date = typeof weekStart === 'string' ? weekStart : weekStart.toISOString().slice(0, 10)
+  return api.get(`/courses/effective?weekStart=${date}`)
+}
+
+export async function getCourseHistory(id) {
+  return api.get(`/courses/${id}/history`)
+}
+
+export async function getCourseCurrentTemp(id) {
+  return api.get(`/courses/${id}/temp`)
+}
+
 export async function saveCourses(courses) {
   throw new Error('API 模式不支持批量保存')
 }
@@ -99,7 +112,14 @@ export async function addCourse(course) {
 }
 
 export async function updateCourse(id, updates) {
+  // 新增可选字段：effectiveFrom、validUntil、createdBy
+  // 后端若收到 effectiveFrom 会自动建 course_schedule + course_history
   await api.put(`/courses/${id}`, updates)
+  return api.get('/courses')
+}
+
+export async function softDeleteCourse(id) {
+  await api.del(`/courses/${id}/status`)
   return api.get('/courses')
 }
 

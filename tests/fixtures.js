@@ -49,7 +49,7 @@ export const test = base.extend({
   }, { scope: 'test' }],
 
   adminPage: async ({ page }, use) => {
-    const api = new ApiClient('http://localhost:3001')
+    const api = new ApiClient(process.env.EDUSYSTEM_API_BASE || page.context()._options.baseURL || 'http://localhost:3001')
     const loginData = await api.login('admin', 'admin123')
 
     await page.route('**/edusystem/api/**', async (route) => {
@@ -80,13 +80,13 @@ export const test = base.extend({
   },
 
   teacherPage: async ({ page }, use) => {
-    const adminApi = new ApiClient('http://localhost:3001')
+    const adminApi = new ApiClient(process.env.EDUSYSTEM_API_BASE || page.context()._options.baseURL || 'http://localhost:3001')
     await adminApi.login('admin', 'admin123')
     const phone = '13900' + Date.now().toString().slice(-6)
     const createRes = await adminApi.post('/teachers', { name: '测试教师_' + Date.now(), phone, subject: '数学' })
     const teacher = await createRes.json()
 
-    const teacherApi = new ApiClient('http://localhost:3001')
+    const teacherApi = new ApiClient(process.env.EDUSYSTEM_API_BASE || page.context()._options.baseURL || 'http://localhost:3001')
     const loginData = await teacherApi.login(phone, '123456')
 
     await page.route('**/edusystem/api/**', async (route) => {
@@ -117,7 +117,7 @@ export const test = base.extend({
     }
     await use(page)
     try {
-      const cleanupApi = new ApiClient('http://localhost:3001')
+      const cleanupApi = new ApiClient(process.env.EDUSYSTEM_API_BASE || page.context()._options.baseURL || 'http://localhost:3001')
       await cleanupApi.login('admin', 'admin123')
       await cleanupApi.del(`/teachers/${teacher.id}`)
     } catch {}

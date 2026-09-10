@@ -52,6 +52,7 @@
           </div>
         </div>
         <div class="course-actions">
+          <button class="btn btn-text" @click="openHistoryDrawer(course)" title="查看历史时间线">📜 历史</button>
           <button class="btn btn-text" @click="editCourse(course)">编辑</button>
           <button class="btn btn-text" style="color: var(--color-danger)" @click="removeCourse(course.id)">删除</button>
         </div>
@@ -62,80 +63,19 @@
       <button class="btn btn-primary" @click="showModal = true" :disabled="teachers.length === 0 || students.length === 0">创建第一门课程</button>
     </div>
 
-    <!-- 添加/编辑弹窗 -->
-    <div class="modal-overlay" v-if="showModal" @click.self="closeModal">
-      <div class="modal">
-        <h2 class="modal-title">{{ editingCourse ? '编辑课程' : '创建课程' }}</h2>
-        <form @submit.prevent="saveCourse">
-          <div class="form-group">
-            <label>课程名称 *</label>
-            <input type="text" class="input" v-model="form.name" required placeholder="如：三年级数学提高班" />
-          </div>
-          <div class="form-group">
-            <label>授课教师 *</label>
-            <SearchSelect
-              v-model="form.teacherId"
-              :options="teachers.map(t => ({ value: t.id, label: t.name }))"
-              placeholder="搜索或选择教师"
-            />
-          </div>
-          <div class="form-group">
-            <label>上课日期 *</label>
-            <SearchSelect
-              v-model="form.weekday"
-              :options="weekdayOptions"
-              placeholder="选择星期"
-              :searchable="false"
-            />
-          </div>
-          <div class="time-row">
-            <div class="form-group">
-              <label>开始时间 *</label>
-              <SearchSelect
-                v-model="form.startTime"
-                :options="timeOptions"
-                placeholder="选择开始时间"
-                :searchable="false"
-              />
-            </div>
-            <div class="form-group">
-              <label>结束时间 *</label>
-              <SearchSelect
-                v-model="form.endTime"
-                :options="timeOptions"
-                placeholder="选择结束时间"
-                :searchable="false"
-              />
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>每次课时</label>
-              <input type="number" class="input" v-model.number="form.hoursPerClass" min="0.5" step="0.5" />
-            </div>
-            <div class="form-group">
-              <label>教室</label>
-              <input type="text" class="input" v-model="form.classroom" placeholder="如：A101" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label>上课学生 *</label>
-            <input type="text" class="input student-search" v-model="studentSearchText" placeholder="搜索学生姓名..." />
-            <div class="student-select">
-              <button type="button" class="student-btn" v-for="s in filteredStudents" :key="s.id"
-                :class="{ selected: form.studentIds.includes(s.id) }"
-                @click="toggleStudent(s.id)">
-                {{ s.name }}
-              </button>
-            </div>
-          </div>
-          <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
-          </div>
-        </form>
-      </div>
-    </div>
+    <!-- 添加/编辑弹窗（共用 CourseEditModal） -->
+    <CourseEditModal
+      :open="showModal"
+      :mode="editingCourse ? 'edit' : 'create'"
+      :course="editingCourse"
+      :effective-date="editEffectiveDate"
+      :teachers="teachers"
+      :students="students"
+      :submitting="submitting"
+      :existing-temp="existingTemp"
+      @submit="onModalSubmit"
+      @cancel="closeModal"
+    />
 
     <!-- 确认弹窗 -->
     <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
@@ -148,14 +88,51 @@
         </div>
       </div>
     </div>
+
+    <!-- 历史抽屉 -->
+    <Teleport to="body">
+      <Transition name="drawer">
+        <div v-if="historyDrawer.open" class="history-overlay" @click.self="closeHistoryDrawer">
+          <div class="history-drawer">
+            <div class="history-header">
+              <h2 class="history-title">📜 {{ historyDrawer.course?.name }} · 历史时间线</h2>
+              <button class="history-close" @click="closeHistoryDrawer" aria-label="关闭">×</button>
+            </div>
+            <div class="history-body">
+              <div v-if="historyDrawer.items.length === 0" class="history-empty">暂无变更记录</div>
+              <div v-else>
+                <div
+                  v-for="(item, idx) in historyDrawer.items"
+                  :key="idx"
+                  class="history-item"
+                  :class="['status-' + classifyTimelineItem(item).status]"
+                >
+                  <div class="history-item-head">
+                    <span class="history-date">{{ item.effectiveFrom }}</span>
+                    <span v-if="item.validUntil" class="history-range">~ {{ item.validUntil }}</span>
+                    <span class="history-status">{{ classifyTimelineItem(item).label }}</span>
+                  </div>
+                  <div class="history-item-body">
+                    <div><strong>教师：</strong>{{ item.teacherName || '未知' }}</div>
+                    <div><strong>学生：</strong>{{ getStudentNames(item.studentIds) }}</div>
+                    <div v-if="item.classroom"><strong>教室：</strong>{{ item.classroom }}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getCourses, addCourse, updateCourse, deleteCourse, getTeachers, getStudents } from '../utils/storage'
+import { getCourses, addCourse, updateCourse, softDeleteCourse, getCourseHistory, getCourseCurrentTemp, getTeachers, getStudents } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 import SearchSelect from '../components/SearchSelect.vue'
+import CourseEditModal from '../components/CourseEditModal.vue'
 
 const toast = useToast()
 const courses = ref([])
@@ -163,7 +140,7 @@ const teachers = ref([])
 const students = ref([])
 const showModal = ref(false)
 const editingCourse = ref(null)
-const studentSearchText = ref('')
+const editEffectiveDate = ref(null)
 const courseSearchText = ref('')
 const searchType = ref('course')
 const searchTypeOptions = [
@@ -175,16 +152,9 @@ const showConfirmModal = ref(false)
 const deleteTargetId = ref('')
 const deleteTargetName = ref('')
 
-const form = ref({
-  name: '',
-  teacherId: '',
-  weekday: 1,
-  startTime: '09:00',
-  endTime: '11:00',
-  hoursPerClass: 1,
-  classroom: '',
-  studentIds: []
-})
+const historyDrawer = ref({ open: false, course: null, items: [] })
+const submitting = ref(false)
+const existingTemp = ref(null)
 
 async function loadData() {
   const [c, t, s] = await Promise.all([
@@ -210,15 +180,6 @@ function handleVisibilityChange() {
   }
 }
 
-// 过滤学生列表
-const filteredStudents = computed(() => {
-  if (!studentSearchText.value) return students.value.filter(s => s.status === 'active')
-  const search = studentSearchText.value.toLowerCase()
-  return students.value.filter(s =>
-    s.name.toLowerCase().includes(search) && s.status === 'active'
-  )
-})
-
 const filteredCourses = computed(() => {
   if (!courseSearchText.value) return courses.value
   const search = courseSearchText.value.toLowerCase()
@@ -230,19 +191,9 @@ const filteredCourses = computed(() => {
   })
 })
 
-const weekdayMap = { 1: '星期一', 2: '星期二', 3: '星期三', 4: '星期四', 5: '星期五', 6: '星期六', 7: '星期日' }
-const weekdayOptions = Object.entries(weekdayMap).map(([v, l]) => ({ value: Number(v), label: l }))
-
-const timeOptions = []
-for (let h = 6; h <= 22; h++) {
-  for (let m = 0; m < 60; m += 30) {
-    const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    timeOptions.push({ value: time, label: time })
-  }
-}
-
 function getWeekdayText(weekday) {
-  return weekdayMap[weekday] || ''
+  const map = { 1: '星期一', 2: '星期二', 3: '星期三', 4: '星期四', 5: '星期五', 6: '星期六', 7: '星期日' }
+  return map[weekday] || ''
 }
 
 function getTeacherName(teacherId) {
@@ -257,44 +208,55 @@ function getStudentNames(studentIds) {
   }).filter(Boolean).join('、') || '无'
 }
 
-function toggleStudent(id) {
-  const index = form.value.studentIds.indexOf(id)
-  if (index === -1) {
-    form.value.studentIds.push(id)
-  } else {
-    form.value.studentIds.splice(index, 1)
+function nextFutureOccurrence(weekday, startTime) {
+  const now = new Date()
+  const targetDow = weekday === 7 ? 0 : weekday
+  const curDow = now.getDay()
+  let diff = (targetDow - curDow + 7) % 7
+  if (diff === 0 && startTime) {
+    const [h, m] = startTime.split(':').map(Number)
+    if (h * 60 + m <= now.getHours() * 60 + now.getMinutes()) diff = 7
   }
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff)
+  return d
 }
 
-function editCourse(course) {
+function toDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+async function editCourse(course) {
   editingCourse.value = course
-  form.value = { ...course, studentIds: [...(course.studentIds || [])] }
+  editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  existingTemp.value = null
+  try {
+    existingTemp.value = await getCourseCurrentTemp(course.id)
+  } catch (_) { /* temp 缺失不影响 modal */ }
   showModal.value = true
 }
 
-const submitting = ref(false)
+function closeModal() {
+  showModal.value = false
+  editingCourse.value = null
+  editEffectiveDate.value = null
+  existingTemp.value = null
+}
 
-async function saveCourse() {
+async function onModalSubmit(payload) {
   if (submitting.value) return
 
-  if (form.value.startTime && form.value.endTime && form.value.startTime >= form.value.endTime) {
+  if (payload.startTime && payload.endTime && payload.startTime >= payload.endTime) {
     toast.error('结束时间必须晚于开始时间')
     return
   }
-  const hpc = Number(form.value.hoursPerClass)
-  if (!hpc || hpc <= 0) {
-    form.value.hoursPerClass = 1
-  } else if (hpc % 0.5 !== 0) {
-    form.value.hoursPerClass = Math.round(hpc * 2) / 2
-  }
-  if (form.value.hoursPerClass < 0.5) {
-    form.value.hoursPerClass = 0.5
-  }
+  const hpc = Number(payload.hoursPerClass)
+  if (!hpc || hpc <= 0) payload.hoursPerClass = 1
+  else if (hpc % 0.5 !== 0) payload.hoursPerClass = Math.round(hpc * 2) / 2
+  if (payload.hoursPerClass < 0.5) payload.hoursPerClass = 0.5
 
   submitting.value = true
   try {
     if (editingCourse.value) {
-      // 编辑前刷新确认课程仍可操作（防止移交后编辑）
       const freshCourses = await getCourses()
       const stillExists = (freshCourses || []).find(c => c.id === editingCourse.value.id)
       if (!stillExists) {
@@ -303,9 +265,10 @@ async function saveCourse() {
         closeModal()
         return
       }
-      courses.value = await updateCourse(editingCourse.value.id, form.value)
+      // payload 来自 CourseEditModal；若包含 effectiveFrom，说明是"从某天起"生效
+      courses.value = await updateCourse(editingCourse.value.id, payload)
     } else {
-      courses.value = await addCourse(form.value)
+      courses.value = await addCourse(payload)
     }
     closeModal()
   } catch (err) {
@@ -327,7 +290,7 @@ async function confirmDeleteCourse() {
   if (submitting.value) return
   submitting.value = true
   try {
-    courses.value = await deleteCourse(deleteTargetId.value)
+    courses.value = await softDeleteCourse(deleteTargetId.value)
     showConfirmModal.value = false
   } catch (err) {
     toast.error(err.message || '删除失败')
@@ -336,20 +299,42 @@ async function confirmDeleteCourse() {
   }
 }
 
-function closeModal() {
-  showModal.value = false
-  editingCourse.value = null
-  studentSearchText.value = ''
-  form.value = {
-    name: '',
-    teacherId: '',
-    weekday: 1,
-    startTime: '09:00',
-    endTime: '11:00',
-    hoursPerClass: 1,
-    classroom: '',
-    studentIds: []
+async function openHistoryDrawer(course) {
+  historyDrawer.value.course = course
+  historyDrawer.value.open = true
+  try {
+    const items = await getCourseHistory(course.id)
+    historyDrawer.value.items = items || []
+  } catch (err) {
+    toast.error('加载历史失败：' + (err.message || ''))
+    historyDrawer.value.items = []
   }
+}
+
+function closeHistoryDrawer() {
+  historyDrawer.value.open = false
+  historyDrawer.value.course = null
+  historyDrawer.value.items = []
+}
+
+function classifyTimelineItem(item) {
+  // kind: 'history' 来自 course_history，'schedule' 来自 course_schedule
+  // 状态：'past' | 'current' | 'pending'
+  if (item.kind === 'history') return { status: 'past', label: '已替换' }
+  // schedule: validUntil = NULL 且 effectiveFrom > today → pending
+  //          validUntil = NULL 且 effectiveFrom <= today → current（开行）
+  //          validUntil 有值 → 临时窗口（按日期判断 past/pending）
+  const today = toDateStr(new Date())
+  if (item.validUntil) {
+    if (item.effectiveFrom >= today) return { status: 'pending-window', label: '待生效（仅本节）' }
+    return { status: 'past-window', label: '历史窗口' }
+  }
+  if (item.effectiveFrom > today) return { status: 'pending', label: '待生效' }
+  return { status: 'current', label: '当前生效' }
+}
+
+function studentCount(studentIds) {
+  return (studentIds || []).length
 }
 </script>
 
@@ -599,6 +584,150 @@ function closeModal() {
   color: var(--color-text);
   line-height: 1.6;
   margin-bottom: 0;
+}
+
+/* ============ 历史抽屉 ============ */
+.history-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1001;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.history-drawer {
+  background: white;
+  width: 100%;
+  max-width: 440px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.18);
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.history-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.history-close {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.history-body {
+  padding: 16px 24px 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.history-empty {
+  text-align: center;
+  color: var(--color-text-secondary);
+  padding: 32px 0;
+  font-size: 14px;
+}
+
+.history-item {
+  border-left: 3px solid var(--color-border);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--color-bg-secondary);
+  border-radius: 6px;
+}
+
+.history-item.status-current {
+  border-left-color: var(--color-primary);
+  background: rgba(0, 113, 227, 0.06);
+}
+
+.history-item.status-pending,
+.history-item.status-pending-window {
+  border-left-color: var(--color-warning);
+  background: rgba(255, 149, 0, 0.06);
+}
+
+.history-item.status-past,
+.history-item.status-past-window {
+  border-left-color: rgba(0, 0, 0, 0.25);
+  opacity: 0.85;
+}
+
+.history-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+
+.history-date {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text);
+}
+
+.history-range {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.history-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--color-text-secondary);
+  margin-left: auto;
+}
+
+.history-item-body {
+  font-size: 12px;
+  color: var(--color-text);
+  line-height: 1.7;
+}
+
+.history-item-body strong {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.drawer-enter-active,
+.drawer-leave-active {
+  transition: opacity 0.2s ease;
+}
+.drawer-enter-active .history-drawer,
+.drawer-leave-active .history-drawer {
+  transition: transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.drawer-enter-from,
+.drawer-leave-to {
+  opacity: 0;
+}
+.drawer-enter-from .history-drawer,
+.drawer-leave-to .history-drawer {
+  transform: translateX(40px);
 }
 
 @media (max-width: 768px) {
