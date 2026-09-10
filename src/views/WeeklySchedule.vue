@@ -235,6 +235,7 @@
       :teachers="teachers"
       :students="students"
       :submitting="submitting"
+      :existing-temp="existingTemp"
       @submit="onModalSubmit"
       @cancel="closeModal"
     />
@@ -243,7 +244,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { getCourses, getEffectiveCourses, addCourse, updateCourse, getTeachers, getStudents, getCourseHistory } from '../utils/storage'
+import { getCourses, getEffectiveCourses, addCourse, updateCourse, getTeachers, getStudents, getCourseHistory, getCourseCurrentTemp } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 import CourseEditModal from '../components/CourseEditModal.vue'
 
@@ -288,6 +289,7 @@ const editingCourse = ref(null)
 const editEffectiveDate = ref(null)
 const modalMode = ref('edit')           // 'edit' | 'create' | 'readonly'
 const submitting = ref(false)
+const existingTemp = ref(null)          // 该课程当前的本周临时 schedule 行（用于 modal 默认勾选）
 
 // 历史抽屉
 const showHistoryDrawer = ref(false)
@@ -509,7 +511,7 @@ function getStudentNames(studentIds) {
 }
 
 // ============================ 弹窗 ============================
-function openEdit(course) {
+async function openEdit(course) {
   editingCourse.value = course
   // 优先用 slot 的实际日期（"这一节"在哪天就编辑哪天），避免跨周错位
   if (course.slotDate) {
@@ -519,9 +521,13 @@ function openEdit(course) {
   }
   modalMode.value = 'edit'
   showModal.value = true
+  existingTemp.value = null
+  try {
+    existingTemp.value = await getCourseCurrentTemp(course.id)
+  } catch (_) { /* temp 缺失不影响 modal */ }
 }
 
-function openReadonly(course) {
+async function openReadonly(course) {
   editingCourse.value = course
   if (course.slotDate) {
     editEffectiveDate.value = new Date(course.slotDate + 'T00:00:00')
@@ -530,6 +536,7 @@ function openReadonly(course) {
   }
   modalMode.value = 'readonly'
   showModal.value = true
+  existingTemp.value = null
 }
 
 function openCreate() {
@@ -537,6 +544,7 @@ function openCreate() {
   editEffectiveDate.value = null
   modalMode.value = 'create'
   showModal.value = true
+  existingTemp.value = null
 }
 
 function nextFutureOccurrence(weekday, startTime) {
@@ -558,6 +566,7 @@ function closeModal() {
   editEffectiveDate.value = null
   submitting.value = false
   mobileListGroup.value = null
+  existingTemp.value = null
 }
 
 // ============================ 历史抽屉 ============================

@@ -30,6 +30,14 @@ router.get('/:id/history', filterByTeacher, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+router.get('/:id/temp', filterByTeacher, async (req, res, next) => {
+  try {
+    await courseService.verifyAccess(req.params.id, req.teacherScope)
+    const temp = await courseService.getCurrentTempSchedule(req.params.id)
+    res.json(temp)
+  } catch (err) { next(err) }
+})
+
 router.post('/', filterByTeacher, async (req, res, next) => {
   try {
     if (req.teacherScope && req.body.teacherId !== req.teacherScope) {

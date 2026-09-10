@@ -43,6 +43,8 @@ function formatSchedule(row) {
     endTime: row.end_time ? String(row.end_time).slice(0, 5) : null,
     hoursPerClass: row.hours_per_class != null ? Number(row.hours_per_class) : null,
     teacherName: row.teacher_name || '',
+    archived: row.archived != null ? Number(row.archived) : 0,
+    supersededAt: formatDate(row.superseded_at),
     createdAt: formatDateTime(row.created_at)
   }
 }
@@ -112,6 +114,26 @@ export async function verifyAccess(id, teacherScope) {
 }
 
 /**
+ * 查询某课程是否有"本周临时"行（archived=0 且 valid_until 在本周内）
+ * 用于 modal 默认 cascade 状态、是否显示"取消本周临时"按钮
+ */
+export async function getCurrentTempSchedule(courseId) {
+  const today = formatDate(new Date())
+  const ws = weekStartOf(today)
+  const we = nextWeekStart(today)
+  const [rows] = await pool.execute(
+    `SELECT cs.*, t.name AS teacher_name FROM course_schedule cs
+     LEFT JOIN teachers t ON t.id = cs.teacher_id
+     WHERE cs.course_id = ? AND cs.archived = 0 AND cs.valid_until IS NOT NULL
+       AND cs.effective_from < ? AND cs.valid_until > ?
+     ORDER BY cs.effective_from DESC LIMIT 1`,
+    [courseId, we, ws]
+  )
+  if (!rows[0]) return null
+  return formatSchedule(rows[0])
+}
+
+/**
  * 给定 (courseId, date) 返回该日期应当生效的可变字段值：
  * 优先查 course_schedule 中 applicable 的最新行，没有则 fallback 到 courses 表。
  * 返回 null 表示课程已被软删除或不存在。
@@ -140,26 +162,24 @@ export async function getEffectiveAt(courseId, date) {
 }
 
 /**
- * 返回某课程完整的"历史 + 当前 + 待生效"时间线（按 effectiveFrom DESC）。
+ * 返回某课程完整的事件流（按 effective_from DESC）。
+ * 新模型: course_schedule 是唯一来源
+ *   archived=0 → kind='schedule' (当前生效)
+ *   archived=1 → kind='history' (已替换)
+ * 排序: archived ASC (活动在前), effective_from DESC (新在前)
  */
 export async function getHistory(courseId) {
-  const [histRows] = await pool.execute(
-    `SELECT ch.*, t.name AS teacher_name FROM course_history ch
-     LEFT JOIN teachers t ON t.id = ch.teacher_id
-     WHERE ch.course_id = ?
-     ORDER BY ch.effective_from DESC`,
-    [courseId]
-  )
   const [schRows] = await pool.execute(
     `SELECT cs.*, t.name AS teacher_name FROM course_schedule cs
      LEFT JOIN teachers t ON t.id = cs.teacher_id
      WHERE cs.course_id = ?
-     ORDER BY cs.effective_from DESC`,
+     ORDER BY cs.archived ASC, cs.effective_from DESC`,
     [courseId]
   )
-  const histories = histRows.map(formatHistory).map(h => ({ ...h, kind: 'history' }))
-  const schedules = schRows.map(formatSchedule).map(s => ({ ...s, kind: 'schedule' }))
-  return [...schedules, ...histories]
+  return schRows.map(formatSchedule).map(s => ({
+    ...s,
+    kind: s.archived === 1 ? 'history' : 'schedule'
+  }))
 }
 
 /**
@@ -191,7 +211,7 @@ export async function getEffectiveForWeek(weekStartDate) {
     `SELECT cs.*, t.name AS teacher_name FROM course_schedule cs
      LEFT JOIN teachers t ON t.id = cs.teacher_id
      WHERE cs.course_id IN (${placeholders})
-     ORDER BY cs.effective_from DESC, cs.valid_until IS NULL, cs.valid_until ASC`,
+     ORDER BY cs.effective_from DESC, cs.archived ASC`,
     ids
   )
   const schByCourse = new Map()
@@ -203,24 +223,32 @@ export async function getEffectiveForWeek(weekStartDate) {
   const today = formatDate(new Date())
   const out = []
   for (const c of formatted) {
-    // F1：回填上限 = courses.created_at（精确到日）。
-    // eff < created_at 的"假装历史"在 L1 下被吞掉——用户应自知。
-    // courses.createdAt 来自 formatDateTime("YYYY-MM-DD HH:mm:ss")，取前 10 位即日期。
-    const createdDate = (c.createdAt || '').slice(0, 10) || formatDate(new Date())
     const schedules = schByCourse.get(c.id) || []
     for (const day of days) {
       const d = new Date(day + 'T00:00:00')
       const dow = d.getDay() === 0 ? 7 : d.getDay() // 1=Mon..7=Sun
-      // K1：仅 weekday=N 且 day >= created_at 的格子才显示 slot。
-      if (day < createdDate) continue
-      const applicable = schedules.find(s =>
-        s.effectiveFrom <= day && (!s.validUntil || s.validUntil > day)
+
+      // 新模型: 本周临时行 (仅 archived=0) 优先; cascading 行允许 archived=1 复活历史快照
+      const tempRow = schedules.find(s =>
+        s.archived === 0 &&
+        s.validUntil !== null && s.validUntil !== '' &&
+        s.effectiveFrom <= day &&
+        day < s.validUntil
       )
-      if (!applicable) continue
-      if (applicable.weekday !== dow) continue
-      if (process.env.DBG_EFFECTIVE) {
-        process.stderr.write(`[DBG] course=${c.id} day=${day} dow=${dow} sched=${applicable.effectiveFrom}/${applicable.weekday}/${applicable.validUntil || 'NULL'} -> push\n`)
+      // cascading 快照: 找 eff ≤ day 中 eff 最大的那一行（archived=0/1 都参与，按 eff DESC）
+      const cascadeRows = schedules
+        .filter(s => (s.validUntil === null || s.validUntil === '') && s.effectiveFrom <= day)
+        .sort((a, b) => (b.effectiveFrom || '').localeCompare(a.effectiveFrom || ''))
+      const cascadeRow = cascadeRows[0] || null
+
+      let applicable = null
+      if (tempRow) {
+        // 本周有临时：仅当 weekday 匹配才显示，否则本周这一天 0 slot（被临时覆盖）
+        if (tempRow.weekday === dow) applicable = tempRow
+      } else if (cascadeRow && cascadeRow.weekday === dow) {
+        applicable = cascadeRow
       }
+      if (!applicable) continue
       out.push({
         ...c,
         courseId: c.id,
@@ -228,6 +256,7 @@ export async function getEffectiveForWeek(weekStartDate) {
         // 否则 courses 表里"默认值"会覆盖本周已版本化生效值
         teacherId: applicable.teacherId,
         teacher_id: applicable.teacherId,
+        teacherName: applicable.teacherName || c.teacherName || '',
         studentIds: applicable.studentIds,
         student_ids: applicable.studentIds,
         classroom: applicable.classroom,
@@ -280,6 +309,18 @@ export async function create(data) {
   }
 }
 
+/**
+ * 新模型 (Plan C):
+ * - course_schedule 永远是事件流：每次 update 写入 1 行新行（archived=0），老行 archived=1
+ * - 同时存在 ≤ 2 条 archived=0: 1 cascading (valid_until=NULL) + 1 本周临时 (valid_until=下周一)
+ * - casc 行（含 archived=1）按 eff DESC LIMIT 1 WHERE eff ≤ day 复活为历史快照
+ * - 本周临时行仅 archived=0 参与；存在时覆盖本周同 weekday；存在但 weekday 不匹配 → 本周该日 0 slot
+ *
+ * 三条路径：
+ *   A. cascading 永久改  (applyTemp=false 且 eff ≥ 下周一)
+ *   B. 本周临时覆盖    (applyTemp=true)
+ *   C. 取消本周临时    (applyTemp=false 且 data.cancelTemp=true)
+ */
 export async function update(id, data) {
   const conn = await pool.getConnection()
   try {
@@ -288,36 +329,53 @@ export async function update(id, data) {
     if (existing.length === 0) throw new Error('课程不存在')
     const c = existing[0]
     const currentStudentIds = parseStudentIds(c.student_ids)
+    const today = formatDate(new Date())
+    const nextMonday = nextWeekStart(today)
 
-    const hasEffectiveFrom = data.effectiveFrom !== undefined && data.effectiveFrom !== null
-    const effectiveFrom = hasEffectiveFrom ? data.effectiveFrom : formatDate(c.effective_from || new Date())
+    const applyTemp = !!data.applyTemp
+    const cancelTemp = !!data.cancelTemp
+    const eff = data.effectiveFrom || today
+    const isThisWeek = eff >= weekStartOf(today) && eff < nextMonday
 
-    if (hasEffectiveFrom) {
-      // 0. 关闭被新行取代的"开放" schedule 行：
-      //    原行建课程时 valid_until=NULL（开放/永久生效），如果不显式关闭，
-      //    新行的 effective_from 起它仍被认为"适用"，与新行重叠 ——
-      //    读算法 .find() 会因 weekday 不匹配跳过新行，然后回退到老行，
-      //    导致"已编辑的下一周仍显示老值"。这里把所有 eff < 新 eff 的开放行
-      //    的 valid_until 设为新 eff，使它们从新 eff 起不再适用。
+    // 工具函数: 把活动行 archived=1, 记 superseded_at=today
+    async function archiveActive(predicate) {
       await conn.execute(
-        `UPDATE course_schedule SET valid_until = ?
-         WHERE course_id = ? AND valid_until IS NULL AND effective_from <= ?`,
-        [effectiveFrom, id, effectiveFrom]
+        `UPDATE course_schedule SET archived = 1, superseded_at = ?
+         WHERE course_id = ? AND archived = 0 AND ${predicate}`,
+        [today, id]
       )
-      // 1. 把当前可变值归档到 course_history
+    }
+
+    if (cancelTemp) {
+      // C. 取消本周临时 —— 把临时行 archived, 不动 cascading, 不动 courses 默认值
+      await archiveActive('valid_until IS NOT NULL')
+    } else if (applyTemp && isThisWeek) {
+      // B. 本周临时 —— 关闭老的本周临时, 插新的
+      await archiveActive('valid_until IS NOT NULL')
       await conn.execute(
-        `INSERT INTO course_history (id, course_id, effective_from, superseded_at, teacher_id, student_ids, classroom, weekday, start_time, end_time, hours_per_class)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [generateId(), id, formatDate(c.effective_from || new Date()), effectiveFrom,
-         c.teacher_id, JSON.stringify(currentStudentIds), c.classroom || '',
-         c.weekday, c.start_time, c.end_time, c.hours_per_class]
-      )
-      // 2. 新值写入 course_schedule（valid_until: null = cascading；日期 = 仅本节）
-      const validUntil = data.validUntil || null
-      await conn.execute(
-        `INSERT INTO course_schedule (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom, weekday, start_time, end_time, hours_per_class, created_by)
+        `INSERT INTO course_schedule
+         (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom,
+          weekday, start_time, end_time, hours_per_class, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [generateId(), id, effectiveFrom, validUntil,
+        [generateId(), id, eff, nextMonday,
+         data.teacherId ?? c.teacher_id,
+         JSON.stringify(data.studentIds || currentStudentIds),
+         data.classroom ?? (c.classroom || ''),
+         data.weekday ?? c.weekday,
+         data.startTime ?? c.start_time,
+         data.endTime ?? c.end_time,
+         data.hoursPerClass ?? c.hours_per_class,
+         data.createdBy || null]
+      )
+    } else {
+      // A. cascading 永久 —— 关闭老 cascading, 插新的
+      await archiveActive('valid_until IS NULL')
+      await conn.execute(
+        `INSERT INTO course_schedule
+         (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom,
+          weekday, start_time, end_time, hours_per_class, created_by)
+         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [generateId(), id, eff,
          data.teacherId ?? c.teacher_id,
          JSON.stringify(data.studentIds || currentStudentIds),
          data.classroom ?? (c.classroom || ''),
@@ -329,7 +387,7 @@ export async function update(id, data) {
       )
     }
 
-    // 3. 更新 courses 当前默认值
+    // 更新 courses 当前默认快照
     await conn.execute(
       `UPDATE courses SET name = ?, teacher_id = ?, weekday = ?, start_time = ?, end_time = ?,
        classroom = ?, hours_per_class = ?, student_ids = ?, effective_from = ? WHERE id = ?`,
@@ -342,7 +400,7 @@ export async function update(id, data) {
         data.classroom !== undefined ? data.classroom : c.classroom,
         data.hoursPerClass !== undefined ? data.hoursPerClass : c.hours_per_class,
         JSON.stringify(data.studentIds || currentStudentIds),
-        effectiveFrom,
+        eff,
         id
       ]
     )
@@ -354,6 +412,22 @@ export async function update(id, data) {
     conn.release()
   }
   return await getById(id)
+}
+
+// 工具: 给定一个日期字符串, 返回所在周的周一 (本地时区)
+function weekStartOf(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00')
+  const dow = d.getDay() === 0 ? 7 : d.getDay() // 1=Mon..7=Sun
+  const m = new Date(d)
+  m.setDate(d.getDate() - (dow - 1))
+  return formatDate(m)
+}
+
+// 工具: 给定一个日期字符串, 返回下一个周一
+function nextWeekStart(dateStr) {
+  const m = new Date(weekStartOf(dateStr) + 'T00:00:00')
+  m.setDate(m.getDate() + 7)
+  return formatDate(m)
 }
 
 export async function softDelete(id) {

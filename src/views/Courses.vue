@@ -72,6 +72,7 @@
       :teachers="teachers"
       :students="students"
       :submitting="submitting"
+      :existing-temp="existingTemp"
       @submit="onModalSubmit"
       @cancel="closeModal"
     />
@@ -128,7 +129,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { getCourses, addCourse, updateCourse, softDeleteCourse, getCourseHistory, getTeachers, getStudents } from '../utils/storage'
+import { getCourses, addCourse, updateCourse, softDeleteCourse, getCourseHistory, getCourseCurrentTemp, getTeachers, getStudents } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 import SearchSelect from '../components/SearchSelect.vue'
 import CourseEditModal from '../components/CourseEditModal.vue'
@@ -153,6 +154,7 @@ const deleteTargetName = ref('')
 
 const historyDrawer = ref({ open: false, course: null, items: [] })
 const submitting = ref(false)
+const existingTemp = ref(null)
 
 async function loadData() {
   const [c, t, s] = await Promise.all([
@@ -223,10 +225,21 @@ function toDateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function editCourse(course) {
+async function editCourse(course) {
   editingCourse.value = course
   editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  existingTemp.value = null
+  try {
+    existingTemp.value = await getCourseCurrentTemp(course.id)
+  } catch (_) { /* temp 缺失不影响 modal */ }
   showModal.value = true
+}
+
+function closeModal() {
+  showModal.value = false
+  editingCourse.value = null
+  editEffectiveDate.value = null
+  existingTemp.value = null
 }
 
 async function onModalSubmit(payload) {
@@ -284,12 +297,6 @@ async function confirmDeleteCourse() {
   } finally {
     submitting.value = false
   }
-}
-
-function closeModal() {
-  showModal.value = false
-  editingCourse.value = null
-  editEffectiveDate.value = null
 }
 
 async function openHistoryDrawer(course) {

@@ -16,13 +16,22 @@
                 <span v-if="mode === 'edit'" class="effective-weekday">{{ weekdayName }}</span>
               </div>
 
-              <!-- cascading 开关（仅 edit 模式） -->
+              <!-- 本周临时提示（仅 edit 模式，且课程当前存在本周临时行时显示） -->
+              <div v-if="mode === 'edit' && existingTemp" class="temp-banner">
+                <span class="temp-label">本周临时</span>
+                <span class="temp-desc">{{ existingTempSummary }}</span>
+                <button v-if="!readonly" type="button" class="btn-cancel-temp" @click="onCancelTemp">
+                  取消本周临时
+                </button>
+              </div>
+
+              <!-- 本周临时 / cascading 开关（仅 edit 模式） -->
               <div v-if="mode === 'edit'" class="cascade-row">
                 <label class="cascade-toggle">
-                  <input type="checkbox" v-model="cascade" :disabled="readonly" />
-                  <span class="cascade-text">从这一节起以后的同周几课程都生效</span>
+                  <input type="checkbox" v-model="applyTemp" :disabled="readonly" />
+                  <span class="cascade-text">仅本周临时（覆盖本周同周几的一节，其他日不显示）</span>
                 </label>
-                <span v-if="!cascade" class="cascade-hint">⚠ 仅本节临时覆盖（{{ formatEffectiveDate }}）</span>
+                <span v-if="!applyTemp" class="cascade-hint">⚠ 从这一节起以后的同周几课程都生效（cascading）</span>
               </div>
 
               <div class="form-group">
@@ -141,7 +150,9 @@ const props = defineProps({
   effectiveDate: { type: [String, Date], default: null }, // 'YYYY-MM-DD' 或 Date
   teachers: { type: Array, default: () => [] },
   students: { type: Array, default: () => [] },
-  submitting: { type: Boolean, default: false }
+  submitting: { type: Boolean, default: false },
+  // 课程当前是否已有"本周临时"行（null = 没有；Object = 该行）
+  existingTemp: { type: Object, default: null }
 })
 
 const emit = defineEmits(['submit', 'cancel'])
@@ -171,10 +182,19 @@ const form = ref({
   studentIds: []
 })
 
-const cascade = ref(true)
+const applyTemp = ref(false)
 const studentSearchText = ref('')
 
 const readonly = computed(() => props.mode === 'readonly')
+
+// 本周临时行的简要描述，例如 "周五 09:00–11:00"
+const existingTempSummary = computed(() => {
+  const t = props.existingTemp
+  if (!t) return ''
+  const wdMap = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日']
+  const wd = wdMap[t.weekday] || ''
+  return `${wd} ${t.startTime}–${t.endTime}`
+})
 
 const formatEffectiveDate = computed(() => {
   if (!props.effectiveDate) return ''
@@ -230,7 +250,8 @@ function reset() {
       studentIds: []
     }
   }
-  cascade.value = true
+  // 默认状态自动反查：若课程已有本周临时行，默认"仅本周临时"勾上；否则 cascading
+  applyTemp.value = !!props.existingTemp
   studentSearchText.value = ''
 }
 
@@ -250,12 +271,17 @@ function onSubmit() {
   }
   if (props.mode === 'edit' && props.effectiveDate) {
     payload.effectiveFrom = formatEffectiveDate.value
-    if (!cascade.value) {
-      // 仅本节：valid_until = effective_from + 1 day
-      const d = new Date(formatEffectiveDate.value + 'T00:00:00')
-      d.setDate(d.getDate() + 1)
-      payload.validUntil = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    }
+    payload.applyTemp = !!applyTemp.value
+    payload.cancelTemp = false
+  }
+  emit('submit', payload)
+}
+
+function onCancelTemp() {
+  if (readonly.value) return
+  const payload = {
+    effectiveFrom: formatEffectiveDate.value,
+    cancelTemp: true
   }
   emit('submit', payload)
 }
@@ -370,6 +396,46 @@ function onCancel() {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.temp-banner {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(255,149,0,0.10), rgba(255,214,10,0.06));
+  border: 1px solid rgba(255,149,0,0.25);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.temp-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-warning, #b36800);
+  letter-spacing: 0.5px;
+}
+
+.temp-desc {
+  flex: 1;
+  font-size: 14px;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.btn-cancel-temp {
+  padding: 4px 12px;
+  font-size: 12px;
+  background: white;
+  border: 1px solid rgba(255,149,0,0.4);
+  border-radius: var(--radius-sm);
+  color: var(--color-warning, #b36800);
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.btn-cancel-temp:hover:not(:disabled) {
+  background: rgba(255,149,0,0.1);
 }
 
 .cascade-toggle {

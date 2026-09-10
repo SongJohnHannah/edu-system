@@ -98,6 +98,10 @@ export async function getCourseHistory(id) {
   return api.get(`/courses/${id}/history`)
 }
 
+export async function getCourseCurrentTemp(id) {
+  return api.get(`/courses/${id}/temp`)
+}
+
 export async function saveCourses(courses) {
   throw new Error('API 模式不支持批量保存')
 }
