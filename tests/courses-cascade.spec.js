@@ -1,12 +1,13 @@
 import { test, expect, ApiClient } from './fixtures.js'
 
 const API = '/edusystem/api'
+const BASE_URL = process.env.EDUSYSTEM_API_BASE || 'http://localhost:3101'
 
 test.describe('课程版本生效模式：cascading vs 临时窗口', () => {
   let api, teacherAId, teacherBId, studentIds = []
 
   test.beforeAll(async () => {
-    api = new ApiClient('http://localhost:3001')
+    api = new ApiClient(BASE_URL)
     await api.login('admin', 'admin123')
 
     const tA = await api.post('/teachers', { name: '教师A_' + Date.now(), phone: '13940' + Date.now().toString().slice(-6) })

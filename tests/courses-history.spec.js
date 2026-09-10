@@ -1,12 +1,13 @@
 import { test, expect, ApiClient } from './fixtures.js'
 
 const API = '/edusystem/api'
+const BASE_URL = process.env.EDUSYSTEM_API_BASE || 'http://localhost:3101'
 
 test.describe('课程历史接口', () => {
   let api, teacherId, studentIds = [], courseId, secondTeacherId
 
   test.beforeAll(async () => {
-    api = new ApiClient('http://localhost:3001')
+    api = new ApiClient(BASE_URL)
     await api.login('admin', 'admin123')
 
     const t1 = await api.post('/teachers', { name: '历史教师A_' + Date.now(), phone: '13910' + Date.now().toString().slice(-6) })

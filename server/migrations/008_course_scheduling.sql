@@ -73,3 +73,87 @@ SELECT
   NOW() AS created_at
 FROM courses
 WHERE status = 'active';
+
+-- 5. course_schedule 加身份字段（weekday/start_time/end_time/hours_per_class）
+--    让"周几 / 几点上课"也可按版本生效。幂等：先检查列是否存在。
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_schedule'
+                     AND COLUMN_NAME = 'weekday');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_schedule ADD COLUMN weekday TINYINT NULL AFTER classroom',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_schedule'
+                     AND COLUMN_NAME = 'start_time');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_schedule ADD COLUMN start_time TIME NULL AFTER weekday',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_schedule'
+                     AND COLUMN_NAME = 'end_time');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_schedule ADD COLUMN end_time TIME NULL AFTER start_time',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_schedule'
+                     AND COLUMN_NAME = 'hours_per_class');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_schedule ADD COLUMN hours_per_class DECIMAL(4,2) NULL AFTER end_time',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- 6. 回填身份字段：用 courses 表的当前值填到现有 schedule 行（幂等：WHERE weekday IS NULL）
+UPDATE course_schedule cs
+JOIN courses c ON c.id = cs.course_id
+SET cs.weekday = c.weekday,
+    cs.start_time = c.start_time,
+    cs.end_time = c.end_time,
+    cs.hours_per_class = c.hours_per_class
+WHERE cs.weekday IS NULL;
+
+-- 7. course_history 也加身份字段（保持历史快照完整）
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_history'
+                     AND COLUMN_NAME = 'weekday');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_history ADD COLUMN weekday TINYINT NULL AFTER classroom',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_history'
+                     AND COLUMN_NAME = 'start_time');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_history ADD COLUMN start_time TIME NULL AFTER weekday',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_history'
+                     AND COLUMN_NAME = 'end_time');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_history ADD COLUMN end_time TIME NULL AFTER start_time',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE()
+                     AND TABLE_NAME = 'course_history'
+                     AND COLUMN_NAME = 'hours_per_class');
+SET @sql = IF(@col_exists = 0,
+  'ALTER TABLE course_history ADD COLUMN hours_per_class DECIMAL(4,2) NULL AFTER end_time',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

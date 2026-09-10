@@ -38,6 +38,10 @@ function formatSchedule(row) {
     teacherId: row.teacher_id,
     studentIds: parseStudentIds(row.student_ids),
     classroom: row.classroom || '',
+    weekday: row.weekday,
+    startTime: row.start_time ? String(row.start_time).slice(0, 5) : null,
+    endTime: row.end_time ? String(row.end_time).slice(0, 5) : null,
+    hoursPerClass: row.hours_per_class != null ? Number(row.hours_per_class) : null,
     teacherName: row.teacher_name || '',
     createdAt: formatDateTime(row.created_at)
   }
@@ -53,6 +57,10 @@ function formatHistory(row) {
     teacherId: row.teacher_id,
     studentIds: parseStudentIds(row.student_ids),
     classroom: row.classroom || '',
+    weekday: row.weekday,
+    startTime: row.start_time ? String(row.start_time).slice(0, 5) : null,
+    endTime: row.end_time ? String(row.end_time).slice(0, 5) : null,
+    hoursPerClass: row.hours_per_class != null ? Number(row.hours_per_class) : null,
     teacherName: row.teacher_name || ''
   }
 }
@@ -155,8 +163,10 @@ export async function getHistory(courseId) {
 }
 
 /**
- * 给定一周起始日期，返回该周内每个课程的生效值（不按天展开，每课一条）。
+ * 给定一周起始日期，返回该周内每个课程的"按周几"的生效值（按天展开）。
  * 用于 WeeklySchedule 一次性拉数据。
+ * - 每门课最多 7 个 slot，但通常 0~2 个（取决于 weekday 在该周是否变化）
+ * - slot.weekday 来自 applicable schedule 行，不再 fallback 到 courses.weekday
  */
 export async function getEffectiveForWeek(weekStartDate) {
   const weekStart = formatDate(weekStartDate)
@@ -193,20 +203,48 @@ export async function getEffectiveForWeek(weekStartDate) {
   const today = formatDate(new Date())
   const out = []
   for (const c of formatted) {
+    // F1：回填上限 = courses.created_at（精确到日）。
+    // eff < created_at 的"假装历史"在 L1 下被吞掉——用户应自知。
+    // courses.createdAt 来自 formatDateTime("YYYY-MM-DD HH:mm:ss")，取前 10 位即日期。
+    const createdDate = (c.createdAt || '').slice(0, 10) || formatDate(new Date())
     const schedules = schByCourse.get(c.id) || []
-    // 找到周内任一天适用的最新 schedule 行（effective_from <= 周日 且 valid_until NULL 或 > 周一）
-    const applicable = schedules.find(s =>
-      s.effectiveFrom <= weekEnd && (!s.validUntil || s.validUntil > weekStart)
-    ) || null
-    const eff = applicable || c
-    out.push({
-      ...c,
-      ...eff,
-      teacherId: eff.teacherId,
-      studentIds: eff.studentIds,
-      classroom: eff.classroom,
-      isPast: weekEnd < today
-    })
+    for (const day of days) {
+      const d = new Date(day + 'T00:00:00')
+      const dow = d.getDay() === 0 ? 7 : d.getDay() // 1=Mon..7=Sun
+      // K1：仅 weekday=N 且 day >= created_at 的格子才显示 slot。
+      if (day < createdDate) continue
+      const applicable = schedules.find(s =>
+        s.effectiveFrom <= day && (!s.validUntil || s.validUntil > day)
+      )
+      if (!applicable) continue
+      if (applicable.weekday !== dow) continue
+      if (process.env.DBG_EFFECTIVE) {
+        process.stderr.write(`[DBG] course=${c.id} day=${day} dow=${dow} sched=${applicable.effectiveFrom}/${applicable.weekday}/${applicable.validUntil || 'NULL'} -> push\n`)
+      }
+      out.push({
+        ...c,
+        courseId: c.id,
+        // 课程身份字段必须以 applicable（course_schedule 行）为准，
+        // 否则 courses 表里"默认值"会覆盖本周已版本化生效值
+        teacherId: applicable.teacherId,
+        teacher_id: applicable.teacherId,
+        studentIds: applicable.studentIds,
+        student_ids: applicable.studentIds,
+        classroom: applicable.classroom,
+        weekday: applicable.weekday,
+        startTime: applicable.startTime,
+        start_time: applicable.startTime,
+        endTime: applicable.endTime,
+        end_time: applicable.endTime,
+        hoursPerClass: applicable.hoursPerClass,
+        hours_per_class: applicable.hoursPerClass,
+        effectiveFrom: applicable.effectiveFrom,
+        effective_from: applicable.effectiveFrom,
+        validUntil: applicable.validUntil,
+        slotDate: day,
+        isPast: day < today
+      })
+    }
   }
   return out
 }
@@ -225,10 +263,12 @@ export async function create(data) {
        data.isTest ? 1 : 0, eff]
     )
     await conn.execute(
-      `INSERT INTO course_schedule (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom, created_by)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?)`,
+      `INSERT INTO course_schedule (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom, weekday, start_time, end_time, hours_per_class, created_by)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [generateId(), id, eff, data.teacherId, JSON.stringify(data.studentIds || []),
-       data.classroom || '', data.createdBy || null]
+       data.classroom || '',
+       data.weekday, data.startTime, data.endTime, data.hoursPerClass || 1,
+       data.createdBy || null]
     )
     await conn.commit()
     return await getById(id)
@@ -253,22 +293,38 @@ export async function update(id, data) {
     const effectiveFrom = hasEffectiveFrom ? data.effectiveFrom : formatDate(c.effective_from || new Date())
 
     if (hasEffectiveFrom) {
+      // 0. 关闭被新行取代的"开放" schedule 行：
+      //    原行建课程时 valid_until=NULL（开放/永久生效），如果不显式关闭，
+      //    新行的 effective_from 起它仍被认为"适用"，与新行重叠 ——
+      //    读算法 .find() 会因 weekday 不匹配跳过新行，然后回退到老行，
+      //    导致"已编辑的下一周仍显示老值"。这里把所有 eff < 新 eff 的开放行
+      //    的 valid_until 设为新 eff，使它们从新 eff 起不再适用。
+      await conn.execute(
+        `UPDATE course_schedule SET valid_until = ?
+         WHERE course_id = ? AND valid_until IS NULL AND effective_from <= ?`,
+        [effectiveFrom, id, effectiveFrom]
+      )
       // 1. 把当前可变值归档到 course_history
       await conn.execute(
-        `INSERT INTO course_history (id, course_id, effective_from, superseded_at, teacher_id, student_ids, classroom)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO course_history (id, course_id, effective_from, superseded_at, teacher_id, student_ids, classroom, weekday, start_time, end_time, hours_per_class)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [generateId(), id, formatDate(c.effective_from || new Date()), effectiveFrom,
-         c.teacher_id, JSON.stringify(currentStudentIds), c.classroom || '']
+         c.teacher_id, JSON.stringify(currentStudentIds), c.classroom || '',
+         c.weekday, c.start_time, c.end_time, c.hours_per_class]
       )
       // 2. 新值写入 course_schedule（valid_until: null = cascading；日期 = 仅本节）
       const validUntil = data.validUntil || null
       await conn.execute(
-        `INSERT INTO course_schedule (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO course_schedule (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom, weekday, start_time, end_time, hours_per_class, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [generateId(), id, effectiveFrom, validUntil,
          data.teacherId ?? c.teacher_id,
          JSON.stringify(data.studentIds || currentStudentIds),
          data.classroom ?? (c.classroom || ''),
+         data.weekday ?? c.weekday,
+         data.startTime ?? c.start_time,
+         data.endTime ?? c.end_time,
+         data.hoursPerClass ?? c.hours_per_class,
          data.createdBy || null]
       )
     }

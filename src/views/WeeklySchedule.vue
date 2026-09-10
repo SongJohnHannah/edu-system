@@ -57,7 +57,7 @@
         <!-- 单卡 (无重叠) -->
         <div
           v-for="c in singleCourses"
-          :key="c.id"
+          :key="c.id + '_' + (c.slotDate || '0')"
           class="course-bar"
           :class="{
             'out-of-bounds': c.outOfBounds,
@@ -67,7 +67,7 @@
             '--c-bg': c.color.bg,
             '--c-fg': c.color.fg,
             '--c-border': c.color.border,
-            gridColumn: c.col + 1,
+            gridColumn: c.col,
             gridRow: `${c.startRow} / span ${c.rowSpan}`
           }"
           @click.stop="handleBarClick(c)"
@@ -90,7 +90,7 @@
           class="overlap-group"
           :class="{ 'is-collapsing': collapsingGroupId === grp.groupId }"
           :style="{
-            gridColumn: grp.col + 1,
+            gridColumn: grp.col,
             gridRow: `${grp.startRow} / span ${grp.rowSpan}`
           }"
           @click.stop="handleBarClick(grp.members[0])"
@@ -98,7 +98,7 @@
           <span class="overlap-group-badge">+{{ grp.members.length }}</span>
           <div
             v-for="c in grp.members"
-            :key="c.id"
+            :key="c.id + '_' + (c.slotDate || '0')"
             class="course-bar is-stacked"
             :class="{
               'out-of-bounds': c.outOfBounds,
@@ -108,7 +108,6 @@
               '--c-bg': c.color.bg,
               '--c-fg': c.color.fg,
               '--c-border': c.color.border,
-              '--stack-translate': `${c.stackIndex * 16}px`,
               '--stack-z': c.stackIndex + 10,
               gridColumn: '1 / -1',
               gridRow: `${c.startRow - grp.startRow + 1} / span ${c.rowSpan}`
@@ -383,6 +382,15 @@ function colToWeekday(col) {
   return col === 1 ? 7 : col - 1
 }
 
+function dateStrToDow(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00')
+  return d.getDay() === 0 ? 7 : d.getDay()
+}
+
+function dateStrToCol(dateStr) {
+  return dateStrToDow(dateStr) === 7 ? 1 : dateStrToDow(dateStr) + 1
+}
+
 // 判断该 slot 是否属于过去：(weekDays[col-1].date + endTime) < now
 function isSlotPast(col, endTime) {
   const day = weekDays.value[col - 1]
@@ -402,7 +410,10 @@ const placedCourses = computed(() => {
     const startRow = timeToRow(c.startTime)
     const endRow = timeToRow(c.endTime)
     const rowSpan = Math.max(1, endRow - startRow)
-    const col = c.weekday === 7 ? 1 : c.weekday + 1 // 1=Sun..7=Sat
+    // 优先用 slotDate（/effective 返回的当日具体日期）计算列位置，
+    // 这样一周里同一课程不同周几的多个 slot 也能各就各位
+    const slotDate = c.slotDate || null
+    const col = slotDate ? dateStrToCol(slotDate) : (c.weekday === 7 ? 1 : c.weekday + 1)
     return {
       ...c,
       col,
@@ -420,7 +431,7 @@ const placedCourses = computed(() => {
     }
   })
 
-  // 按列扫描, 用 sweep 算法识别重叠组 (含跨课程的传递重叠)
+  // 按列扫描, 用 sweep 算法识别严格时间重叠的组
   for (let col = 1; col <= 7; col++) {
     const colCourses = placed
       .filter(p => p.col === col)
@@ -441,14 +452,16 @@ const placedCourses = computed(() => {
     }
     for (const c of colCourses) {
       const cEnd = c.startRow + c.rowSpan
+      // groupId 必须包含 slotDate，同一课程在不同周几的多个 slot 不应该被误判为一组
+      const slotKey = c.slotDate || (c.weekday === 7 ? 'sun' : `wd${c.weekday}`)
       if (c.startRow < groupEndRow) {
-        // 与当前组时间重叠, 归入同一重叠组
+        // 与当前组时间重叠, 归入同一组
         groupMembers.push(c)
         groupEndRow = Math.max(groupEndRow, cEnd)
       } else {
         // 首尾相接或不相邻, 开始新的组
         flushGroup()
-        groupId = `${col}-${c.startRow}-${cEnd}`
+        groupId = `${col}-${slotKey}-${c.startRow}-${cEnd}`
         groupMembers = [c]
         groupEndRow = cEnd
       }
@@ -498,15 +511,23 @@ function getStudentNames(studentIds) {
 // ============================ 弹窗 ============================
 function openEdit(course) {
   editingCourse.value = course
-  // 未来 occurrence 默认为当天/下一节课日期
-  editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  // 优先用 slot 的实际日期（"这一节"在哪天就编辑哪天），避免跨周错位
+  if (course.slotDate) {
+    editEffectiveDate.value = new Date(course.slotDate + 'T00:00:00')
+  } else {
+    editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  }
   modalMode.value = 'edit'
   showModal.value = true
 }
 
 function openReadonly(course) {
   editingCourse.value = course
-  editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  if (course.slotDate) {
+    editEffectiveDate.value = new Date(course.slotDate + 'T00:00:00')
+  } else {
+    editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
+  }
   modalMode.value = 'readonly'
   showModal.value = true
 }
@@ -643,14 +664,14 @@ async function onModalSubmit(payload) {
   submitting.value = true
   try {
     if (editingCourse.value) {
-      courses.value = await updateCourse(editingCourse.value.id, payload)
+      await updateCourse(editingCourse.value.id, payload)
       toast.success('课程已更新')
     } else {
-      courses.value = await addCourse(payload)
+      await addCourse(payload)
       toast.success('课程已创建')
     }
     closeModal()
-    // 编辑完成后重新加载，确保当周展示新值
+    // 编辑完成后重新加载 /effective，确保当周展示新值
     await loadData()
   } catch (err) {
     toast.error(err.message || '保存失败')
@@ -672,20 +693,12 @@ async function loadData() {
   teachers.value = t || []
   students.value = s || []
 
-  // 过去周调 effective endpoint；本周/未来周调 courses（更快）
-  if (isViewingPast.value) {
-    try {
-      const ws = formatDate(weekStart.value)
-      courses.value = (await getEffectiveCourses(ws)) || []
-      return
-    } catch (err) {
-      toast.error('加载历史课程失败：' + (err.message || ''))
-      courses.value = []
-      return
-    }
-  }
+  // 始终走 /effective 拿"按天展开"的生效值。这样：
+  //   - 过去周看到当时实际生效的老师与排课
+  //   - 本周/未来周能看到"未来某天已生效"的新版本（仅该天/该周，不影响其他周）
   try {
-    courses.value = (await getCourses()) || []
+    const ws = formatDate(weekStart.value)
+    courses.value = (await getEffectiveCourses(ws)) || []
   } catch (err) {
     toast.error('加载课程失败：' + (err.message || ''))
     courses.value = []
@@ -900,7 +913,7 @@ function handleWindowClick(e) {
   position: relative;
   display: grid;
   grid-template-columns: subgrid;
-  grid-auto-rows: subgrid;
+  grid-template-rows: subgrid;
   grid-auto-flow: row dense;
   pointer-events: none;
 }
@@ -944,20 +957,22 @@ function handleWindowClick(e) {
 }
 
 .bar-name {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
 .bar-meta {
-  font-size: 11px;
+  font-size: 10px;
   opacity: 0.85;
   font-weight: 500;
   display: flex;
   align-items: center;
   gap: 4px;
+  line-height: 1.2;
 }
 
 .warn-icon {
@@ -1014,29 +1029,37 @@ function handleWindowClick(e) {
 /* ============ 重叠堆叠样式 ============ */
 .course-bar.is-stacked {
   z-index: var(--stack-z);
-  transform: translateY(var(--stack-translate));
+  outline: 1.5px dashed rgba(0, 0, 0, 0.55);
+  outline-offset: -1.5px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.10), 0 1px 2px rgba(0, 0, 0, 0.08);
   transition: transform 0.25s ease, box-shadow 0.2s ease;
+  padding: 4px 8px;
+  gap: 1px;
+}
+.course-bar.is-stacked:nth-child(1) {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 .course-bar.is-stacked:hover {
+  transform: scale(1.02);
   z-index: calc(var(--stack-z) + 3);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
 }
 
 /* ============ 重叠组虚线包裹框 ============ */
 .overlap-group {
   position: relative;
   pointer-events: auto;
-  border: 2px dashed rgba(0, 0, 0, 0.55);
+  border: 0;
   border-radius: 12px;
   margin: 0 4px;
   padding: 0;
-  background: rgba(255, 255, 255, 0.65);
+  background: transparent;
   cursor: pointer;
   display: grid;
   grid-template-columns: 1fr;
   grid-auto-rows: 24px;
   z-index: 5;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease;
 }
 .overlap-group:hover {
   border-color: rgba(0, 113, 227, 0.85);
@@ -1048,7 +1071,7 @@ function handleWindowClick(e) {
 
 .overlap-group-badge {
   position: absolute;
-  top: -11px;
+  top: -18px;
   right: -10px;
   min-width: 26px;
   height: 26px;
