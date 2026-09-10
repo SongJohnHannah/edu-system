@@ -39,8 +39,14 @@ test.describe('课程版本生效模式：cascading vs 临时窗口', () => {
     })
     const courseId = (await cRes.json()).id
 
-    const future = new Date(Date.now() + 14 * 86400000) // 两周后
-    const futureStr = future.toISOString().slice(0, 10)
+    // 找一个未来 weekday=3 (周三) 的日期，作为 new eff
+    let future = new Date()
+    future.setHours(0, 0, 0, 0)
+    while (((future.getDay() || 7) !== 3) || future <= new Date()) {
+      future.setDate(future.getDate() + 1)
+    }
+    // 本地日期（避免 toISOString 的 UTC 偏移）
+    const futureStr = `${future.getFullYear()}-${String(future.getMonth() + 1).padStart(2, '0')}-${String(future.getDate()).padStart(2, '0')}`
 
     const putRes = await api.put(`/courses/${courseId}`, {
       teacherId: teacherBId,
@@ -49,7 +55,7 @@ test.describe('课程版本生效模式：cascading vs 临时窗口', () => {
     })
     expect(putRes.status).toBe(200)
 
-    // 验证历史时间线：1 条 history (A被替换) + 1 条 schedule (B从future起永久)
+    // 验证历史时间线：1 条 history (A被替换) + 1 条 active schedule (B从future起永久)
     const histRes = await api.get(`/courses/${courseId}/history`)
     const items = await histRes.json()
     const schedules = items.filter(i => i.kind === 'schedule')
@@ -64,7 +70,7 @@ test.describe('课程版本生效模式：cascading vs 临时窗口', () => {
     expect(newSch.effectiveFrom).toBe(futureStr)
     expect(newSch.validUntil === null || newSch.validUntil === undefined || newSch.validUntil === '').toBe(true)
 
-    // 验证 effective：在 futureStr 当天查询，应当返回 teacherBId
+    // 验证 effective: 在 futureStr 当天所在周，应有 teacherBId 的 slot
     const effRes = await api.get(`/courses/effective?weekStart=${futureStr}`)
     expect(effRes.status).toBe(200)
     const slots = await effRes.json()
@@ -76,7 +82,7 @@ test.describe('课程版本生效模式：cascading vs 临时窗口', () => {
     await api.del(`/courses/${courseId}`)
   })
 
-  test('临时窗口（validUntil=有效日期）：仅当天/某天临时生效', async () => {
+  test('临时窗口（applyTemp=true）：仅本周一节临时生效', async () => {
     const cRes = await api.post('/courses', {
       name: '临时窗口课程_' + Date.now(),
       teacherId: teacherAId,
@@ -89,42 +95,57 @@ test.describe('课程版本生效模式：cascading vs 临时窗口', () => {
     const courseId = (await cRes.json()).id
 
     const today = new Date()
-    const todayStr = today.toISOString().slice(0, 10)
-    const tomorrow = new Date(today.getTime() + 86400000)
-    const tomorrowStr = tomorrow.toISOString().slice(0, 10)
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 
-    // 仅本节：validUntil = tomorrowStr → 仅 todayStr 当天用 B，之后恢复 A
+    // 本周(weekStart=本周日)，用于 effective 查询
+    const sun = new Date(today)
+    sun.setDate(sun.getDate() - (sun.getDay() === 0 ? 0 : sun.getDay()))
+    const weekStart = `${sun.getFullYear()}-${String(sun.getMonth() + 1).padStart(2, '0')}-${String(sun.getDate()).padStart(2, '0')}`
+
+    // 新模型：applyTemp=true + effectiveFrom=今天 → 本周临时覆盖
     const putRes = await api.put(`/courses/${courseId}`, {
       teacherId: teacherBId,
       effectiveFrom: todayStr,
-      validUntil: tomorrowStr,
+      applyTemp: true,
     })
     expect(putRes.status).toBe(200)
 
     const histRes = await api.get(`/courses/${courseId}/history`)
     const items = await histRes.json()
-    const schedules = items.filter(i => i.kind === 'schedule')
+    // 本周临时行 validUntil != null，且 archived=0 → kind='schedule'
+    const schedules = items.filter(i => i.kind === 'schedule' && i.validUntil && i.validUntil !== '')
 
-    // schedule 行必须有 validUntil=tomorrow
-    const newSch = schedules.sort((a, b) => (b.effectiveFrom || '').localeCompare(a.effectiveFrom || ''))[0]
+    // schedule 行必须有 validUntil=下周一（不是 tomorrowStr）
+    expect(schedules.length).toBe(1)
+    const newSch = schedules[0]
     expect(newSch.teacherId).toBe(teacherBId)
     expect(newSch.effectiveFrom).toBe(todayStr)
-    expect(newSch.validUntil).toBe(tomorrowStr)
+    expect(newSch.validUntil).toBeTruthy()
+    // validUntil 应该是下周一（明天之后）
+    expect(newSch.validUntil > todayStr).toBe(true)
 
-    // 验证 effective：今天应是 B，明天恢复 A
-    const effRes = await api.get(`/courses/effective?weekStart=${todayStr}`)
+    // 验证 effective: temp 行 weekday=5 (周五)，本周内仅周五 9/11 应出现 teacherB
+    // 本周(weekStart=本周日)的周五日期
+    const fri = new Date(sun)
+    fri.setDate(fri.getDate() + 5)
+    const friStr = `${fri.getFullYear()}-${String(fri.getMonth() + 1).padStart(2, '0')}-${String(fri.getDate()).padStart(2, '0')}`
+    const effRes = await api.get(`/courses/effective?weekStart=${weekStart}`)
     expect(effRes.status).toBe(200)
     const slots = await effRes.json()
-    const todaySlot = slots.find(s => s.courseId === courseId && s.slotDate === todayStr)
-    const tomorrowSlot = slots.find(s => s.courseId === courseId && s.slotDate === tomorrowStr)
-    if (todaySlot) expect(todaySlot.teacherId).toBe(teacherBId)
-    if (tomorrowSlot) expect(tomorrowSlot.teacherId).toBe(teacherAId)
+    const ourSlots = slots.filter(s => s.courseId === courseId)
+    // 本周内应该恰好 1 个 slot，落在周五
+    expect(ourSlots.length).toBe(1)
+    expect(ourSlots[0].slotDate).toBe(friStr)
+    expect(ourSlots[0].teacherId).toBe(teacherBId)
+    // 本周其他日(非周五)不出现
+    const otherDays = ourSlots.filter(s => s.slotDate !== friStr)
+    expect(otherDays.length).toBe(0)
 
     // 清理
     await api.del(`/courses/${courseId}`)
   })
 
-  test('UI：编辑课程时显示「生效日期」+ cascading 开关', async ({ adminPage }) => {
+  test('UI：编辑课程时显示「生效日期」+ 本周临时开关', async ({ adminPage }) => {
     const cRes = await api.post('/courses', {
       name: 'UI模式课程_' + Date.now(),
       teacherId: teacherAId,
@@ -148,16 +169,19 @@ test.describe('课程版本生效模式：cascading vs 临时窗口', () => {
     await expect(banner).toBeVisible()
     await expect(banner).toContainText('生效日期')
 
-    // cascading 开关存在且默认勾选
+    // 没有本周临时 → 复选框默认未勾选（= cascading）
     const toggle = adminPage.locator('.cascade-toggle input[type="checkbox"]')
     await expect(toggle).toBeVisible()
     const isChecked = await toggle.isChecked()
-    expect(isChecked).toBe(true)
+    expect(isChecked).toBe(false)
 
-    // 取消勾选 → 提示「仅本节临时覆盖」
+    // 默认状态下显示 cascading 提示
+    await expect(adminPage.locator('.cascade-hint')).toContainText('cascading')
+
+    // 勾上 → 提示消失（= 本周临时模式）
     await toggle.click()
     await adminPage.waitForTimeout(200)
-    await expect(adminPage.locator('.cascade-hint')).toContainText('仅本节')
+    await expect(adminPage.locator('.cascade-hint')).toHaveCount(0)
 
     // 关闭 modal
     await adminPage.locator('.modal button:has-text("取消")').click()

@@ -79,7 +79,10 @@ test.describe('课程历史接口', () => {
   })
 
   test('GET /courses/effective 返回该周所有 slot', async () => {
+    // 新模型: course_schedule 行的 effective_from 必须 ≤ slotDate 才算生效。
+    // 课程创建时 eff=today；所以本周内任何 day >= today 且 weekday 匹配的 slot 都会出现。
     const today = new Date()
+    const todayStr = today.toISOString().slice(0, 10)
     const dayOfWeek = today.getDay() || 7
     const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - dayOfWeek + 1)
     const weekStart = monday.toISOString().slice(0, 10)
@@ -87,9 +90,17 @@ test.describe('课程历史接口', () => {
     expect(res.status).toBe(200)
     const slots = await res.json()
     expect(Array.isArray(slots)).toBe(true)
-    // 我们的课程 weekday=2 (周一)，应该有 1 个 slot 落在该周
+    // courseId 在 beforeAll 创建（weekday=2 周一，eff=today）
+    // 新模型：仅当 eff(=today) <= day 且 weekday=2 匹配时才出现
     const ownSlots = slots.filter(s => s.id === courseId)
-    expect(ownSlots.length).toBeGreaterThanOrEqual(1)
+    const expectedDow = 2 // weekday=2 周一
+    for (const s of ownSlots) {
+      const d = new Date(s.slotDate + 'T00:00:00')
+      const dow = d.getDay() === 0 ? 7 : d.getDay()
+      expect(dow).toBe(expectedDow)
+      // eff=today 必须 ≤ slotDate
+      expect(s.slotDate >= todayStr).toBe(true)
+    }
     // slot 必须含 slotDate + isPast 字段
     for (const s of ownSlots) {
       expect(typeof s.slotDate).toBe('string')

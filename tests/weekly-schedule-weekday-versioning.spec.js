@@ -163,12 +163,13 @@ test.describe('Plan B：weekday/start_time/end_time 跨周版本化', () => {
     expect(nextWeekThu.endTime).toBe('16:00')
     expect(nextWeekThu.teacherId).toBe(teacherBId)
 
-    // ---- 步骤 4：历史时间线 — 应有 1 条 history (周二+教师A 被替换) + 2 条 schedule (初值+新值) ----
+    // ---- 步骤 4：历史时间线 — 应有 1 条 history (周二+教师A 被替换) + 1 条 active schedule (新 cascading) ----
+    // 新模型: 老 cascading archived=1 (kind=history)；新 cascading archived=0 (kind=schedule)
     const histItems = await (await api.get(`/courses/${courseId}/history`)).json()
     const histories = histItems.filter(i => i.kind === 'history')
     const schedules = histItems.filter(i => i.kind === 'schedule')
     expect(histories.length).toBeGreaterThanOrEqual(1)
-    expect(schedules.length).toBeGreaterThanOrEqual(2)
+    expect(schedules.length).toBeGreaterThanOrEqual(1)
 
     const replacedHist = histories[0]
     expect(replacedHist.weekday).toBe(2)
