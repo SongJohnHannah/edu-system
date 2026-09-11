@@ -68,7 +68,7 @@
       :open="showModal"
       :mode="editingCourse ? 'edit' : 'create'"
       :course="editingCourse"
-      :effective-date="editEffectiveDate"
+      :view-week-start="viewWeekStartStr"
       :teachers="teachers"
       :students="students"
       :submitting="submitting"
@@ -140,7 +140,6 @@ const teachers = ref([])
 const students = ref([])
 const showModal = ref(false)
 const editingCourse = ref(null)
-const editEffectiveDate = ref(null)
 const courseSearchText = ref('')
 const searchType = ref('course')
 const searchTypeOptions = [
@@ -155,6 +154,14 @@ const deleteTargetName = ref('')
 const historyDrawer = ref({ open: false, course: null, items: [] })
 const submitting = ref(false)
 const existingTemp = ref(null)
+
+// 即改即用：排课管理页面没有"周"上下文，临时行锚定到"今天所在周"的周一
+const viewWeekStartStr = computed(() => {
+  const d = new Date()
+  const dow = d.getDay() === 0 ? 7 : d.getDay() // 1=Mon..7=Sun
+  d.setDate(d.getDate() - (dow - 1))
+  return toDateStr(d)
+})
 
 async function loadData() {
   const [c, t, s] = await Promise.all([
@@ -208,29 +215,15 @@ function getStudentNames(studentIds) {
   }).filter(Boolean).join('、') || '无'
 }
 
-function nextFutureOccurrence(weekday, startTime) {
-  const now = new Date()
-  const targetDow = weekday === 7 ? 0 : weekday
-  const curDow = now.getDay()
-  let diff = (targetDow - curDow + 7) % 7
-  if (diff === 0 && startTime) {
-    const [h, m] = startTime.split(':').map(Number)
-    if (h * 60 + m <= now.getHours() * 60 + now.getMinutes()) diff = 7
-  }
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff)
-  return d
-}
-
 function toDateStr(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 async function editCourse(course) {
   editingCourse.value = course
-  editEffectiveDate.value = nextFutureOccurrence(course.weekday, course.startTime)
   existingTemp.value = null
   try {
-    existingTemp.value = await getCourseCurrentTemp(course.id)
+    existingTemp.value = await getCourseCurrentTemp(course.id, viewWeekStartStr.value)
   } catch (_) { /* temp 缺失不影响 modal */ }
   showModal.value = true
 }
@@ -238,7 +231,6 @@ async function editCourse(course) {
 function closeModal() {
   showModal.value = false
   editingCourse.value = null
-  editEffectiveDate.value = null
   existingTemp.value = null
 }
 
@@ -265,7 +257,7 @@ async function onModalSubmit(payload) {
         closeModal()
         return
       }
-      // payload 来自 CourseEditModal；若包含 effectiveFrom，说明是"从某天起"生效
+      // payload 来自 CourseEditModal；即改即用：applyTemp+cancelTemp+tempWeekStart
       courses.value = await updateCourse(editingCourse.value.id, payload)
     } else {
       courses.value = await addCourse(payload)
@@ -318,15 +310,12 @@ function closeHistoryDrawer() {
 }
 
 function classifyTimelineItem(item) {
-  // kind: 'history' 来自 course_history，'schedule' 来自 course_schedule
-  // 状态：'past' | 'current' | 'pending'
+  // kind: 'history' 来自 archived=1，'schedule' 来自 archived=0
+  // 状态：'past' | 'current' | 'pending' | 'pending-window' | 'past-window'
   if (item.kind === 'history') return { status: 'past', label: '已替换' }
-  // schedule: validUntil = NULL 且 effectiveFrom > today → pending
-  //          validUntil = NULL 且 effectiveFrom <= today → current（开行）
-  //          validUntil 有值 → 临时窗口（按日期判断 past/pending）
   const today = toDateStr(new Date())
   if (item.validUntil) {
-    if (item.effectiveFrom >= today) return { status: 'pending-window', label: '待生效（仅本节）' }
+    if (item.effectiveFrom >= today) return { status: 'pending-window', label: '待生效（整周临时）' }
     return { status: 'past-window', label: '历史窗口' }
   }
   if (item.effectiveFrom > today) return { status: 'pending', label: '待生效' }

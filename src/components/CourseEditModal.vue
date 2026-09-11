@@ -9,17 +9,11 @@
 
           <form @submit.prevent="onSubmit" class="modal-form">
             <div class="modal-body">
-              <!-- 生效日期（edit 时可选择；create 时隐藏） -->
+              <!-- 即改即用：顶部 banner 显示"所查看的周"范围（编辑课程时） -->
               <div v-if="mode !== 'create'" class="effective-banner">
-                <span v-if="mode === 'edit'" class="effective-label">生效日期</span>
-                <span v-else class="effective-label">生效日期</span>
-                <CalendarPicker
-                  v-if="mode === 'edit'"
-                  v-model="editableEffectiveDate"
-                  :min="todayStr"
-                />
-                <span v-else class="effective-date">{{ formatEffectiveDate }}</span>
-                <span v-if="mode === 'edit'" class="effective-weekday">{{ weekdayName }}</span>
+                <span class="effective-label">查看周</span>
+                <span class="effective-date">{{ weekRangeLabel }}</span>
+                <span class="effective-weekday">{{ weekdayName }}</span>
               </div>
 
               <!-- 本周临时提示（仅 edit 模式，且课程当前存在本周临时行时显示） -->
@@ -31,13 +25,13 @@
                 </button>
               </div>
 
-              <!-- 本周临时 / cascading 开关（仅 edit 模式） -->
+              <!-- 临时覆盖 / cascading 开关（仅 edit 模式） -->
               <div v-if="mode === 'edit'" class="cascade-row">
                 <label class="cascade-toggle">
                   <input type="checkbox" v-model="applyTemp" :disabled="readonly" />
-                  <span class="cascade-text">仅本周临时（覆盖本周同周几的一节，其他日不显示）</span>
+                  <span class="cascade-text">仅 {{ weekRangeLabel }} 所在周临时覆盖（整周）</span>
                 </label>
-                <span v-if="!applyTemp" class="cascade-hint">⚠ 从这一节起以后的同周几课程都生效（cascading）</span>
+                <span v-if="!applyTemp" class="cascade-hint">⚠ 立即永久生效（cascading），本周和以后所有同周几课程都用新值</span>
               </div>
 
               <div class="form-group">
@@ -148,17 +142,17 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import SearchSelect from './SearchSelect.vue'
-import CalendarPicker from './CalendarPicker.vue'
 
 const props = defineProps({
   open: Boolean,
   mode: { type: String, default: 'edit' }, // 'create' | 'edit' | 'readonly'
   course: { type: Object, default: null },
-  effectiveDate: { type: [String, Date], default: null }, // 'YYYY-MM-DD' 或 Date
+  // 所查看那周的周一 (YYYY-MM-DD)，即改即用：临时覆盖应用于该周
+  viewWeekStart: { type: String, default: '' },
   teachers: { type: Array, default: () => [] },
   students: { type: Array, default: () => [] },
   submitting: { type: Boolean, default: false },
-  // 课程当前是否已有"本周临时"行（null = 没有；Object = 该行）
+  // 课程当前在 viewWeekStart 所在周是否已有"临时"行（null = 没有；Object = 该行）
   existingTemp: { type: Object, default: null }
 })
 
@@ -194,14 +188,6 @@ const studentSearchText = ref('')
 
 const readonly = computed(() => props.mode === 'readonly')
 
-// 用户在 modal 里实际选择的生效日期（YYYY-MM-DD），edit 模式可改
-const editableEffectiveDate = ref('')
-
-const todayStr = computed(() => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-})
-
 // 本周临时行的简要描述，例如 "周五 09:00–11:00"
 const existingTempSummary = computed(() => {
   const t = props.existingTemp
@@ -211,19 +197,35 @@ const existingTempSummary = computed(() => {
   return `${wd} ${t.startTime}–${t.endTime}`
 })
 
-const formatEffectiveDate = computed(() => {
-  if (!props.effectiveDate) return ''
-  if (typeof props.effectiveDate === 'string') {
-    return props.effectiveDate.startsWith('T') ? '' : props.effectiveDate.split('T')[0]
-  }
-  const d = props.effectiveDate
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// 工具：YYYY-MM-DD → 本地 Date（避免时区漂移）
+function parseLocalDate(dateStr) {
+  if (!dateStr) return null
+  return new Date(dateStr + 'T00:00:00')
+}
+
+// "查看周"周范围展示，例如 "9月28日-10月4日"
+const weekRangeLabel = computed(() => {
+  const ws = props.viewWeekStart
+  if (!ws) return ''
+  const start = parseLocalDate(ws)
+  if (!start) return ''
+  const end = new Date(start)
+  end.setDate(start.getDate() + 6)
+  const m1 = start.getMonth() + 1
+  const d1 = start.getDate()
+  const m2 = end.getMonth() + 1
+  const d2 = end.getDate()
+  return m1 === m2
+    ? `${m1}月${d1}日-${d2}日`
+    : `${m1}月${d1}日-${m2}月${d2}日`
 })
 
+// 周一对应的中文星期几（用于 banner 标注"本周的周一"）
 const weekdayName = computed(() => {
-  const dateStr = editableEffectiveDate.value || formatEffectiveDate.value
-  if (!dateStr) return ''
-  const d = new Date(dateStr + 'T00:00:00')
+  const ws = props.viewWeekStart
+  if (!ws) return ''
+  const d = parseLocalDate(ws)
+  if (!d) return ''
   return weekdayMap[d.getDay() === 0 ? 7 : d.getDay()] || ''
 })
 
@@ -266,11 +268,9 @@ function reset() {
       studentIds: []
     }
   }
-  // 默认状态自动反查：若课程已有本周临时行，默认"仅本周临时"勾上；否则 cascading
+  // 默认状态：若所查看周已有 temp 行，默认勾上"仅本周临时"；否则 cascading
   applyTemp.value = !!props.existingTemp
   studentSearchText.value = ''
-  // 生效日期初始化为父组件传入的值（edit 时用户可改；readonly 时锁定）
-  editableEffectiveDate.value = formatEffectiveDate.value || ''
 }
 
 watch(() => props.open, (val) => {
@@ -283,31 +283,33 @@ watch(() => props.course, () => {
 
 function onSubmit() {
   if (readonly.value) return
-  // 防御：用户手动清空或选了今天之前的日期
-  const eff = editableEffectiveDate.value || formatEffectiveDate.value
-  if (!eff) return
-  if (eff < todayStr.value) {
-    alert('生效日期不能早于今天')
-    return
-  }
   const payload = {
     ...form.value,
     hoursPerClass: Number(form.value.hoursPerClass) || 1
   }
   if (props.mode === 'edit') {
-    payload.effectiveFrom = eff
     payload.applyTemp = !!applyTemp.value
     payload.cancelTemp = false
+    if (applyTemp.value && props.viewWeekStart) {
+      payload.tempWeekStart = props.viewWeekStart
+    }
   }
   emit('submit', payload)
 }
 
 function onCancelTemp() {
   if (readonly.value) return
-  const eff = editableEffectiveDate.value || formatEffectiveDate.value
-  if (!eff) return
+  if (!props.viewWeekStart) return
   const payload = {
-    effectiveFrom: eff,
+    name: props.course?.name,
+    teacherId: props.course?.teacherId,
+    weekday: props.course?.weekday,
+    startTime: props.course?.startTime,
+    endTime: props.course?.endTime,
+    hoursPerClass: props.course?.hoursPerClass,
+    classroom: props.course?.classroom,
+    studentIds: props.course?.studentIds || [],
+    tempWeekStart: props.viewWeekStart,
     cancelTemp: true
   }
   emit('submit', payload)

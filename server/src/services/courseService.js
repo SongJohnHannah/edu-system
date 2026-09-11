@@ -114,20 +114,21 @@ export async function verifyAccess(id, teacherScope) {
 }
 
 /**
- * 查询某课程是否有"本周临时"行（archived=0 且 valid_until 在本周内）
+ * 查询某课程在指定周（精确匹配周一~下周一）的活跃临时行
  * 用于 modal 默认 cascade 状态、是否显示"取消本周临时"按钮
+ * @param {string} courseId
+ * @param {string} [weekStart] - YYYY-MM-DD，默认为今天所在周的周一
  */
-export async function getCurrentTempSchedule(courseId) {
-  const today = formatDate(new Date())
-  const ws = weekStartOf(today)
-  const we = nextWeekStart(today)
+export async function getCurrentTempSchedule(courseId, weekStart) {
+  const ws = weekStart || weekStartOf(formatDate(new Date()))
+  const we = nextWeekStart(ws)
   const [rows] = await pool.execute(
     `SELECT cs.*, t.name AS teacher_name FROM course_schedule cs
      LEFT JOIN teachers t ON t.id = cs.teacher_id
      WHERE cs.course_id = ? AND cs.archived = 0 AND cs.valid_until IS NOT NULL
-       AND cs.effective_from < ? AND cs.valid_until > ?
+       AND cs.effective_from = ? AND cs.valid_until = ?
      ORDER BY cs.effective_from DESC LIMIT 1`,
-    [courseId, we, ws]
+    [courseId, ws, we]
   )
   if (!rows[0]) return null
   return formatSchedule(rows[0])
@@ -317,9 +318,9 @@ export async function create(data) {
  * - 本周临时行仅 archived=0 参与；存在时覆盖本周同 weekday；存在但 weekday 不匹配 → 本周该日 0 slot
  *
  * 三条路径：
- *   A. cascading 永久改  (applyTemp=false 且 eff ≥ 下周一)
- *   B. 本周临时覆盖    (applyTemp=true)
- *   C. 取消本周临时    (applyTemp=false 且 data.cancelTemp=true)
+ *   A. cascading 永久改  (applyTemp=false)
+ *   B. 临时覆盖某一周    (applyTemp=true, tempWeekStart=所查看周的周一)
+ *   C. 取消某一周的临时  (cancelTemp=true, tempWeekStart=所查看周的周一)
  */
 export async function update(id, data) {
   const conn = await pool.getConnection()
@@ -330,34 +331,40 @@ export async function update(id, data) {
     const c = existing[0]
     const currentStudentIds = parseStudentIds(c.student_ids)
     const today = formatDate(new Date())
-    const nextMonday = nextWeekStart(today)
 
     const applyTemp = !!data.applyTemp
     const cancelTemp = !!data.cancelTemp
-    const eff = data.effectiveFrom || today
-    const isThisWeek = eff >= weekStartOf(today) && eff < nextMonday
+    const tempWeekStart = data.tempWeekStart || weekStartOf(today)
+    const tempWeekEnd = nextWeekStart(tempWeekStart)
 
     // 工具函数: 把活动行 archived=1, 记 superseded_at=today
-    async function archiveActive(predicate) {
+    // predicate 可以包含占位符 ?，extraParams 透传
+    async function archiveActive(predicate, extraParams = []) {
       await conn.execute(
         `UPDATE course_schedule SET archived = 1, superseded_at = ?
          WHERE course_id = ? AND archived = 0 AND ${predicate}`,
-        [today, id]
+        [today, id, ...extraParams]
       )
     }
 
     if (cancelTemp) {
-      // C. 取消本周临时 —— 把临时行 archived, 不动 cascading, 不动 courses 默认值
-      await archiveActive('valid_until IS NOT NULL')
-    } else if (applyTemp && isThisWeek) {
-      // B. 本周临时 —— 关闭老的本周临时, 插新的
-      await archiveActive('valid_until IS NOT NULL')
+      // C. 取消指定周的临时行 —— 仅 archive 那 1 行
+      await archiveActive(
+        'valid_until IS NOT NULL AND effective_from = ? AND valid_until = ?',
+        [tempWeekStart, tempWeekEnd]
+      )
+    } else if (applyTemp) {
+      // B. 临时覆盖（整周）—— 先 archive 同周旧 temp，插新
+      await archiveActive(
+        'valid_until IS NOT NULL AND effective_from = ? AND valid_until = ?',
+        [tempWeekStart, tempWeekEnd]
+      )
       await conn.execute(
         `INSERT INTO course_schedule
          (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom,
           weekday, start_time, end_time, hours_per_class, created_by)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [generateId(), id, eff, nextMonday,
+        [generateId(), id, tempWeekStart, tempWeekEnd,
          data.teacherId ?? c.teacher_id,
          JSON.stringify(data.studentIds || currentStudentIds),
          data.classroom ?? (c.classroom || ''),
@@ -368,14 +375,15 @@ export async function update(id, data) {
          data.createdBy || null]
       )
     } else {
-      // A. cascading 永久 —— 关闭老 cascading, 插新的
+      // A. cascading 永久 —— 先清掉所有临时行（无论周），再 archive 老 cascading，插新
+      await archiveActive('valid_until IS NOT NULL')
       await archiveActive('valid_until IS NULL')
       await conn.execute(
         `INSERT INTO course_schedule
          (id, course_id, effective_from, valid_until, teacher_id, student_ids, classroom,
           weekday, start_time, end_time, hours_per_class, created_by)
          VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [generateId(), id, eff,
+        [generateId(), id, today,
          data.teacherId ?? c.teacher_id,
          JSON.stringify(data.studentIds || currentStudentIds),
          data.classroom ?? (c.classroom || ''),
@@ -400,7 +408,7 @@ export async function update(id, data) {
         data.classroom !== undefined ? data.classroom : c.classroom,
         data.hoursPerClass !== undefined ? data.hoursPerClass : c.hours_per_class,
         JSON.stringify(data.studentIds || currentStudentIds),
-        eff,
+        today,
         id
       ]
     )

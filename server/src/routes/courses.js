@@ -33,7 +33,7 @@ router.get('/:id/history', filterByTeacher, async (req, res, next) => {
 router.get('/:id/temp', filterByTeacher, async (req, res, next) => {
   try {
     await courseService.verifyAccess(req.params.id, req.teacherScope)
-    const temp = await courseService.getCurrentTempSchedule(req.params.id)
+    const temp = await courseService.getCurrentTempSchedule(req.params.id, req.query.weekStart)
     res.json(temp)
   } catch (err) { next(err) }
 })

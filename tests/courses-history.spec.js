@@ -49,19 +49,16 @@ test.describe('课程历史接口', () => {
     expect(schedules.length).toBeGreaterThanOrEqual(1)
   })
 
-  test('更新课程（带 effectiveFrom）后产生 history 记录', async () => {
-    const future = new Date(Date.now() + 7 * 86400000)
-    const futureStr = future.toISOString().slice(0, 10)
+  test('更新课程（applyTemp=false）后产生 history 记录', async () => {
+    // 即改即用：不再传 effectiveFrom；后端自动用 today 写入 cascading 行
+    const todayStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(new Date().getDate()).padStart(2, '0')}`
     const res = await api.put(`/courses/${courseId}`, {
       teacherId: secondTeacherId,
-      effectiveFrom: futureStr,
-      validUntil: null, // cascading
     })
     expect(res.status).toBe(200)
 
     const histRes = await api.get(`/courses/${courseId}/history`)
     const items = await histRes.json()
-    // 至少包含 1 条历史 + 1 条 schedule
     const histories = items.filter(i => i.kind === 'history')
     const schedules = items.filter(i => i.kind === 'schedule')
     expect(histories.length).toBeGreaterThanOrEqual(1)
@@ -71,10 +68,10 @@ test.describe('课程历史接口', () => {
     const newestHist = histories.sort((a, b) => (b.supersededAt || '').localeCompare(a.supersededAt || ''))[0]
     expect(newestHist.teacherId).toBe(teacherId)
 
-    // 检查 schedule 行带有新 teacherId + cascading（validUntil=null）
+    // 检查 schedule 行带有新 teacherId + cascading（validUntil=null），effective_from=today
     const newSch = schedules.sort((a, b) => (b.effectiveFrom || '').localeCompare(a.effectiveFrom || ''))[0]
     expect(newSch.teacherId).toBe(secondTeacherId)
-    expect(newSch.effectiveFrom).toBe(futureStr)
+    expect(newSch.effectiveFrom).toBe(todayStr)
     expect(newSch.validUntil === null || newSch.validUntil === undefined || newSch.validUntil === '').toBe(true)
   })
 

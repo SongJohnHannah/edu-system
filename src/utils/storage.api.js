@@ -98,8 +98,9 @@ export async function getCourseHistory(id) {
   return api.get(`/courses/${id}/history`)
 }
 
-export async function getCourseCurrentTemp(id) {
-  return api.get(`/courses/${id}/temp`)
+export async function getCourseCurrentTemp(id, weekStart) {
+  const query = weekStart ? `?weekStart=${weekStart}` : ''
+  return api.get(`/courses/${id}/temp${query}`)
 }
 
 export async function saveCourses(courses) {
@@ -112,8 +113,8 @@ export async function addCourse(course) {
 }
 
 export async function updateCourse(id, updates) {
-  // 新增可选字段：effectiveFrom、validUntil、createdBy
-  // 后端若收到 effectiveFrom 会自动建 course_schedule + course_history
+  // 即改即用：cascading 改动立即生效（后端自动用 today 作为 effective_from）；
+  // 临时覆盖通过 applyTemp + tempWeekStart 传参。
   await api.put(`/courses/${id}`, updates)
   return api.get('/courses')
 }
