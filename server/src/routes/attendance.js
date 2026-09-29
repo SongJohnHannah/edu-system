@@ -6,8 +6,8 @@ const router = Router()
 
 router.get('/', filterByTeacher, async (req, res, next) => {
   try {
-    const { limit, offset } = req.query
-    const result = await attendanceService.getAll(req.teacherScope, { limit, offset })
+    const { limit, offset, includeVoided, courseId, month, date, originalDate, scope } = req.query
+    const result = await attendanceService.getAll(req.teacherScope, { limit, offset, includeVoided: includeVoided === '1', courseId, month, date, originalDate, scope })
     res.json(result)
   } catch (err) { next(err) }
 })
@@ -21,14 +21,14 @@ router.post('/', filterByTeacher, async (req, res, next) => {
 
 router.delete('/:id', filterByTeacher, async (req, res, next) => {
   try {
-    await attendanceService.remove(req.params.id, req.teacherScope)
+    await attendanceService.remove(req.params.id, req.teacherScope, req.user)
     res.json({ success: true })
   } catch (err) { next(err) }
 })
 
 router.post('/:id/remove-students', filterByTeacher, async (req, res, next) => {
   try {
-    await attendanceService.removeStudents(req.params.id, req.body.studentIds, req.teacherScope)
+    await attendanceService.removeStudents(req.params.id, req.body.studentIds, req.teacherScope, req.user)
     res.json({ success: true })
   } catch (err) { next(err) }
 })

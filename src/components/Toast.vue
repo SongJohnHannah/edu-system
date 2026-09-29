@@ -2,7 +2,7 @@
   <Transition name="toast">
     <div class="toast" v-if="state.visible" :class="state.type">
       <span class="toast-icon">{{ iconMap[state.type] }}</span>
-      <span class="toast-message">{{ state.message }}</span>
+      <span class="toast-message">{{ state.message }}</span><button aria-label="关闭提示" @click="state.visible = false">×</button>
     </div>
   </Transition>
 </template>
@@ -31,9 +31,9 @@ const iconMap = {
   display: flex;
   align-items: center;
   gap: 10px;
-  z-index: 2000;
+  z-index: 5000;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-  max-width: 400px;
+  width: max-content; max-width: min(92vw, 560px); max-height: 70vh; overflow-y: auto;
   text-align: center;
 }
 
@@ -48,34 +48,35 @@ const iconMap = {
   font-weight: 700;
   flex-shrink: 0;
 }
+.toast-message { white-space: pre-line; text-align: left; }
 
 .toast.success {
   background: white;
   color: var(--color-success);
-  border: 1px solid rgba(52, 199, 89, 0.2);
+  border: 1px solid rgba(53, 124, 101, 0.2);
 }
-.toast.success .toast-icon { background: rgba(52, 199, 89, 0.15); }
+.toast.success .toast-icon { background: rgba(53, 124, 101, 0.15); }
 
 .toast.error {
   background: white;
   color: var(--color-danger);
-  border: 1px solid rgba(255, 59, 48, 0.2);
+  border: 1px solid rgba(179, 79, 80, 0.2);
 }
-.toast.error .toast-icon { background: rgba(255, 59, 48, 0.15); }
+.toast.error .toast-icon { background: rgba(179, 79, 80, 0.15); }
 
 .toast.warning {
   background: white;
   color: var(--color-warning);
-  border: 1px solid rgba(255, 149, 0, 0.2);
+  border: 1px solid rgba(173, 108, 29, 0.2);
 }
-.toast.warning .toast-icon { background: rgba(255, 149, 0, 0.15); }
+.toast.warning .toast-icon { background: rgba(173, 108, 29, 0.15); }
 
 .toast.info {
   background: white;
   color: var(--color-primary);
-  border: 1px solid rgba(0, 113, 227, 0.2);
+  border: 1px solid rgba(65, 120, 185, 0.2);
 }
-.toast.info .toast-icon { background: rgba(0, 113, 227, 0.15); }
+.toast.info .toast-icon { background: rgba(65, 120, 185, 0.15); }
 
 .toast-enter-active { animation: toast-in 0.3s ease; }
 .toast-leave-active { animation: toast-in 0.25s ease reverse; }

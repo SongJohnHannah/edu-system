@@ -34,3 +34,6 @@ playwright-report/
 
 # Claude Code
 .claude/
+
+# Isolated QA services, data and reports
+.qa/

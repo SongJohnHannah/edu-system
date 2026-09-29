@@ -1,7 +1,6 @@
 <template>
   <div class="dashboard fade-in">
-    <h1 class="page-title">欢迎使用教务管理系统</h1>
-    <p class="page-subtitle">轻松管理学生、教师和课程</p>
+    <div class="welcome"><div><h1 class="page-title">教师工作台</h1><p class="page-subtitle">查看今天的课程、学生和试听安排</p></div><img src="/brand/waving-bear.png" alt="挥手的小熊" /></div>
 
     <div class="quick-actions">
       <h2 class="section-title">快速操作</h2>
@@ -48,7 +47,24 @@
           </div>
           <span>创建课程</span>
         </router-link>
+        <router-link to="/trial-bookings" class="action-card"><div class="action-icon trial">☆</div><span>试听预约</span></router-link>
       </div>
+    </div>
+
+    <div v-if="loading" class="section trial-today" role="status">正在加载工作台数据…</div>
+    <div v-else-if="loadError" class="section trial-today" role="alert"><p>工作台数据加载失败，请重试</p><OfficeButton class="btn btn-secondary" @click="loadData">重试</OfficeButton></div>
+    <template v-else>
+    <div class="section trial-today"><div class="section-heading"><h2 class="section-title">今日正式课程</h2><router-link to="/weekly-schedule">查看周排课</router-link></div><div v-if="todayCourses.length" class="trial-today-list"><router-link v-for="course in todayCourses" :key="course.id" :to="{ path: '/weekly-schedule', query: { date: course.date } }" class="trial-today-item formal"><strong>{{ course.startTime }}—{{ course.endTime }}</strong><span>{{ course.name }} · {{ course.teacherName }}</span><small>正式学生 {{ course.studentIds.length }} 人<span v-if="course.trialCount" class="trial-inline"> · 试听 {{ course.trialCount }} 人</span></small></router-link></div><p v-else class="trial-today-empty">今天没有正式课程</p></div>
+    <div class="section trial-today">
+      <div class="section-heading"><h2 class="section-title">今日试听预约</h2><router-link to="/trial-bookings">查看全部</router-link></div>
+      <div v-if="todayTrials.length" class="trial-today-list">
+        <router-link v-for="booking in todayTrials" :key="booking.id" :to="{ path: '/trial-bookings', query: { date: booking.date, booking: booking.id } }" class="trial-today-item">
+          <strong>{{ booking.startTime }}—{{ booking.endTime }}</strong>
+          <span>{{ booking.studentName }} · {{ booking.teacherName }}</span>
+          <small>{{ booking.courseName || '独立试听' }}</small>
+        </router-link>
+      </div>
+      <p v-else class="trial-today-empty">今天没有试听预约</p>
     </div>
 
     <div class="section">
@@ -69,7 +85,7 @@
           </div>
         </router-link>
 
-        <router-link to="/teachers" class="stat-card" v-if="isAdmin">
+        <router-link to="/teachers" class="stat-card">
           <div class="stat-icon teachers">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
@@ -149,45 +165,72 @@
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { getStudents, getTeachers, getCourses, getAttendance } from '../utils/storage'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { getStudents, getTeachers, getCourseOccurrences, getTrialBookings, getAllAttendance } from '../utils/storage'
+import { useToast } from '../composables/useToast.js'
+import { useAuthStore } from '../stores/auth.js'
 
-const useApi = import.meta.env.VITE_USE_API === 'true'
-const isAdmin = computed(() => {
-  if (!useApi) return true
-  try {
-    const user = JSON.parse(localStorage.getItem('user') || 'null')
-    return user?.role === 'admin'
-  } catch { return false }
-})
+const toast = useToast()
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.isAdmin)
 
 const students = ref([])
 const teachers = ref([])
 const courses = ref([])
 const attendance = ref([])
+const todayTrials = ref([])
+const loading = ref(true)
+const loadError = ref(false)
 
 // 获取今日日期信息
-const today = new Date()
-const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-const todayWeekday = today.getDay() || 7  // 0 转为 7（周日）
+function localDate(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` }
+const todayStr = ref(localDate(new Date()))
+let loadSequence = 0
+let loadErrorToast = null
 
-onMounted(async () => {
-  const [s, t, c, a] = await Promise.all([
-    getStudents(), getTeachers(), getCourses(), getAttendance()
-  ])
-  students.value = s || []
-  teachers.value = t || []
-  courses.value = c || []
-  attendance.value = a || []
-})
+async function loadData() {
+  const sequence = ++loadSequence
+  const date = localDate(new Date())
+  loading.value = true
+  loadError.value = false
+  try {
+    const [s, t, c, a, b] = await Promise.all([
+      getStudents(), getTeachers(), getCourseOccurrences(date, date), getAllAttendance(),
+      getTrialBookings({ start: date, end: date, status: 'active' })
+    ])
+    if (sequence !== loadSequence) return
+    todayStr.value = date
+    students.value = s || []
+    teachers.value = t || []
+    courses.value = c || []
+    attendance.value = a || []
+    todayTrials.value = b || []
+    toast.clearError(loadErrorToast)
+    loadErrorToast = null
+  } catch (error) {
+    if (sequence === loadSequence) { loadError.value = true; loadErrorToast = toast.error(error.message || '工作台加载失败') }
+  } finally {
+    if (sequence === loadSequence) loading.value = false
+  }
+}
+function refreshVisible() { if (document.visibilityState === 'visible') loadData() }
+let midnightTimer
+function scheduleMidnightRefresh() {
+  const now = new Date()
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  midnightTimer = setTimeout(() => { loadData(); scheduleMidnightRefresh() }, nextMidnight - now + 50)
+}
+onMounted(() => { loadData(); scheduleMidnightRefresh(); document.addEventListener('visibilitychange', refreshVisible) })
+onUnmounted(() => { loadSequence++; clearTimeout(midnightTimer); document.removeEventListener('visibilitychange', refreshVisible) })
 
 // 今日课程
 const todayCourses = computed(() => {
-  return courses.value.filter(c => c.weekday === todayWeekday)
+  return courses.value
 })
 
 // 今日上课教师数
@@ -212,18 +255,18 @@ const todayCourseCount = computed(() => {
 
 // 今日已消耗课时
 const todayUsedHours = computed(() => {
-  const todayRecords = attendance.value.filter(r => r.date === todayStr)
+  const todayRecords = attendance.value.filter(r => r.date === todayStr.value)
   return todayRecords.reduce((sum, r) => sum + (r.hoursDeducted ?? 1) * ((r.studentIds || []).length), 0)
 })
 
 // 今日点名次数
 const todayAttendanceCount = computed(() => {
-  return attendance.value.filter(r => r.date === todayStr).length
+  return attendance.value.filter(r => r.date === todayStr.value).length
 })
 
 // 本月点名次数
 const thisMonthAttendanceCount = computed(() => {
-  const thisMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+  const thisMonth = todayStr.value.slice(0, 7)
   return attendance.value.filter(r => r.date && r.date.startsWith(thisMonth)).length
 })
 
@@ -231,6 +274,7 @@ const thisMonthAttendanceCount = computed(() => {
 const lowHoursStudents = computed(() => {
   return students.value
     .filter(s => {
+      if (s.enrollmentStage === 'pending' || s.status !== 'active') return false
       const r = (s.totalHours || 0) - (s.usedHours || 0)
       return r < 3
     })
@@ -244,6 +288,11 @@ function formatRemaining(student) {
 </script>
 
 <style scoped>
+.welcome { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 20px 0 26px; }
+.welcome img { width: 88px; height: 108px; object-fit: contain; }
+.action-icon.trial { background: #fff4e5; color: #9b621c; font-size: 27px; }
+.welcome .page-title, .welcome .page-subtitle { text-align: left; margin-bottom: 4px; }
+@media (max-width: 599px) { .welcome { justify-content: space-between; } .welcome img { width: 70px; height: 88px; } }
 .dashboard {
   max-width: 900px;
   margin: 0 auto;
@@ -279,10 +328,20 @@ function formatRemaining(student) {
 .quick-actions {
   margin-bottom: 40px;
 }
+.section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.section-heading a { color: var(--color-primary); font-size: 13px; text-decoration: none; }
+.trial-today-list { display: grid; gap: 8px; }
+.trial-today-item { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid #efdfc9; border-radius: var(--radius-md); background: #fffaf3; color: var(--color-text); text-decoration: none; }
+.trial-today-item strong { color: #946729; }
+.trial-today-item.formal { background: white; border-color: var(--color-border); }
+.trial-today-item.formal strong { color: var(--color-primary); }
+.trial-inline { color: var(--color-warning); font-weight: 600; }
+.trial-today-item small { margin-left: auto; color: var(--color-text-secondary); }
+.trial-today-empty { padding: 16px; border: 1px dashed var(--color-border); border-radius: var(--radius-md); color: var(--color-text-secondary); font-size: 13px; }
 
 .actions-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
   gap: 16px;
 }
 
@@ -313,10 +372,10 @@ function formatRemaining(student) {
   margin: 0 auto 12px;
 }
 
-.action-icon.attendance { background: rgba(175, 82, 222, 0.1); color: #af52de; }
-.action-icon.students { background: rgba(0, 113, 227, 0.1); color: var(--color-primary); }
-.action-icon.teachers { background: rgba(52, 199, 89, 0.1); color: var(--color-success); }
-.action-icon.courses { background: rgba(255, 149, 0, 0.1); color: var(--color-warning); }
+.action-icon.attendance, .action-icon.students, .action-icon.teachers, .action-icon.courses {
+  background: var(--color-selected);
+  color: var(--color-primary);
+}
 
 .stats-grid {
   display: grid;
@@ -352,12 +411,11 @@ function formatRemaining(student) {
   flex-shrink: 0;
 }
 
-.stat-icon.students { background: rgba(0, 113, 227, 0.1); color: var(--color-primary); }
-.stat-icon.teachers { background: rgba(52, 199, 89, 0.1); color: var(--color-success); }
-.stat-icon.courses { background: rgba(255, 149, 0, 0.1); color: var(--color-warning); }
-.stat-icon.hours { background: rgba(255, 59, 48, 0.1); color: var(--color-danger); }
-.stat-icon.attendance { background: rgba(175, 82, 222, 0.1); color: #af52de; }
-.stat-icon.month-attendance { background: rgba(90, 200, 250, 0.1); color: #5ac8fa; }
+.stat-icon.students, .stat-icon.teachers, .stat-icon.courses,
+.stat-icon.hours, .stat-icon.attendance, .stat-icon.month-attendance {
+  background: var(--color-selected);
+  color: var(--color-primary);
+}
 
 .stat-info {
   display: flex;
@@ -416,6 +474,8 @@ function formatRemaining(student) {
   .actions-grid {
     grid-template-columns: repeat(2, 1fr);
   }
+  .action-card:last-child:nth-child(odd) { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 16px; }
+  .action-card:last-child:nth-child(odd) .action-icon { margin: 0; }
 
   .page-title {
     font-size: 28px;

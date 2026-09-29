@@ -6,17 +6,24 @@
         <p class="page-subtitle">管理所有学生信息和课时</p>
       </div>
       <div class="header-actions">
-        <button class="btn btn-secondary" @click="showBatchModal = true">
+        <OfficeButton class="btn btn-secondary" @click="showBatchModal = true" :disabled="loading || loadError">
           批量添加
-        </button>
-        <button class="btn btn-primary" @click="openAddModal">
+        </OfficeButton>
+        <OfficeButton class="btn btn-primary" @click="openAddModal" :disabled="loading || loadError">
           <span>+</span> 添加学生
-        </button>
+        </OfficeButton>
       </div>
     </div>
 
-    <div class="search-bar">
-      <input
+    <div v-if="loading" class="empty-state" role="status">正在加载学生资料…</div>
+    <div v-else-if="loadError" class="empty-state" role="alert">
+      <p>学生资料加载失败，请重试</p>
+      <OfficeButton class="btn btn-secondary" @click="loadData">重试</OfficeButton>
+    </div>
+
+    <div class="search-bar" v-if="!loading && !loadError">
+      <div class="scope-filter"><OfficeButton class="btn btn-text" :class="{ selected: scopeFilter === 'all' }" @click="scopeFilter = 'all'">全部学生</OfficeButton><OfficeButton class="btn btn-text" :class="{ selected: scopeFilter === 'mine' }" @click="scopeFilter = 'mine'">我录入的</OfficeButton><OfficeButton class="btn btn-text" :class="{ selected: showArchived }" @click="showArchived = !showArchived">{{ showArchived ? '隐藏归档' : '查看归档' }}</OfficeButton></div>
+      <OfficeInput
         type="text"
         class="input"
         placeholder="搜索学生姓名或电话..."
@@ -24,13 +31,14 @@
       />
     </div>
 
-    <div class="table-container desktop-only">
-      <table class="table" v-if="filteredStudents.length > 0">
+    <div class="table-container desktop-only" v-if="!loading && !loadError">
+      <OfficeTable class="table" v-if="filteredStudents.length > 0">
         <thead>
           <tr>
             <th>姓名</th>
             <th>年龄</th>
             <th>联系电话</th>
+            <th>报名阶段</th><th>录入人</th>
             <th>总课时</th>
             <th>已用课时</th>
             <th class="sortable" @click="toggleSort">
@@ -43,15 +51,17 @@
         </thead>
         <tbody>
           <tr v-for="student in filteredStudents" :key="student.id" :class="{ 'row-deleted': student.status === 'deleted' || student.status === 'quit' }">
-            <td><strong>{{ student.name }}</strong></td>
+            <td><OfficeButton class="btn btn-text" @click="detailStudent = student">{{ student.name }}</OfficeButton></td>
             <td>{{ student.age || '-' }}</td>
             <td>{{ student.phone || '-' }}</td>
+            <td>{{ student.enrollmentStage === 'pending' ? '待报名' : '已报名' }}</td>
+            <td>{{ creatorName(student) }}</td>
             <td>{{ student.totalHours }}</td>
             <td>{{ student.usedHours || 0 }}</td>
             <td>{{ (student.totalHours || 0) - (student.usedHours || 0) }}</td>
             <td>
               <div class="status-badges">
-                <span class="badge" :class="getStudentStatusClass(student)" @click="openStatusMenu(student)">
+                <span class="badge" :class="getStudentStatusClass(student)" @click="student.status !== 'deleted' && canEdit(student) && openStatusMenu(student)">
                   {{ getStudentStatusText(student) }}
                 </span>
                 <span class="badge" :class="getHoursStatusClass(student)">
@@ -60,81 +70,83 @@
               </div>
             </td>
             <td>
-              <div class="action-buttons" v-if="student.status === 'active'">
-                <button class="btn btn-text" @click="openAddHoursModal(student)" title="加减课时">加减课</button>
-                <button class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</button>
-                <button class="btn btn-text" @click="editStudent(student)">编辑</button>
-                <button class="btn btn-text" style="color: var(--color-danger)" @click="removeStudent(student)">删除</button>
+              <div class="action-buttons" v-if="student.status !== 'deleted'">
+                <OfficeButton v-if="canEdit(student)" class="btn btn-text" @click="openAddHoursModal(student)" title="加减课时">加减课</OfficeButton>
+                <OfficeButton class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</OfficeButton>
+                <OfficeButton v-if="canEdit(student)" class="btn btn-text" @click="editStudent(student)">编辑</OfficeButton>
+                <OfficeButton v-if="canArchive(student)" class="btn btn-text" style="color: var(--color-danger)" @click="removeStudent(student)">归档</OfficeButton>
               </div>
               <div class="action-buttons" v-else>
-                <button class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</button>
+                <OfficeButton class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</OfficeButton>
               </div>
             </td>
           </tr>
         </tbody>
-      </table>
+      </OfficeTable>
       <div class="empty-state" v-else>
         <p>暂无学生数据</p>
         <div class="empty-actions">
-          <button class="btn btn-secondary" @click="showBatchModal = true">批量添加</button>
-          <button class="btn btn-primary" @click="openAddModal">添加第一个学生</button>
+          <OfficeButton class="btn btn-secondary" @click="showBatchModal = true">批量添加</OfficeButton>
+          <OfficeButton class="btn btn-primary" @click="openAddModal">添加第一个学生</OfficeButton>
         </div>
       </div>
     </div>
 
     <!-- 移动端卡片列表 -->
-    <div class="mobile-card-list mobile-only" v-if="filteredStudents.length > 0">
+    <div class="mobile-card-list mobile-only" v-if="!loading && !loadError && filteredStudents.length > 0">
       <div class="mobile-card" v-for="student in filteredStudents" :key="student.id" :class="{ 'card-deleted': student.status === 'deleted' || student.status === 'quit' }">
         <div class="mobile-card-sticky">
-          <strong class="mobile-name" @click="showNameTip(student, $event)">{{ student.name }}</strong>
+          <button class="mobile-name" type="button" @click="openMobileStudent(student, $event)">{{ student.name }}</button>
+          <span class="mobile-creator">{{ student.enrollmentStage === 'pending' ? '待报名' : '已报名' }} · {{ creatorName(student) }}<template v-if="student.enrollmentStage !== 'pending' && getHoursStatusText(student) !== '正常'"> · {{ getHoursStatusText(student) }}</template></span>
           <div class="mobile-right-info">
             <span class="mobile-remaining" :class="getHoursStatusClass(student)">{{ (student.totalHours || 0) - (student.usedHours || 0) }} 课时</span>
-            <span class="badge mobile-status-badge" :class="getStudentStatusClass(student)" @click="openStatusMenu(student)">
+            <span class="badge mobile-status-badge" :class="getStudentStatusClass(student)" @click="student.status !== 'deleted' && canEdit(student) && openStatusMenu(student)">
               {{ getStudentStatusText(student) }}
             </span>
           </div>
         </div>
         <div class="mobile-card-actions">
-          <template v-if="student.status === 'active'">
-            <button class="btn btn-text" @click="openAddHoursModal(student)">加减课</button>
-            <button class="btn btn-text" @click="goToHistory(student.id)">历史</button>
-            <button class="btn btn-text" @click="editStudent(student)">编辑</button>
-            <button class="btn btn-text btn-danger-text" @click="removeStudent(student)">删除</button>
+          <template v-if="student.status !== 'deleted'">
+            <OfficeButton v-if="canEdit(student)" class="btn btn-text" @click="openAddHoursModal(student)">加减课</OfficeButton>
+            <OfficeButton class="btn btn-text" @click="goToHistory(student.id)">历史</OfficeButton>
+            <OfficeButton v-if="canEdit(student)" class="btn btn-text" @click="editStudent(student)">编辑</OfficeButton>
+            <OfficeButton v-if="canArchive(student)" class="btn btn-text btn-danger-text" @click="removeStudent(student)">归档</OfficeButton>
           </template>
           <template v-else>
-            <button class="btn btn-text" @click="goToHistory(student.id)">历史</button>
+            <OfficeButton class="btn btn-text" @click="goToHistory(student.id)">历史</OfficeButton>
           </template>
         </div>
       </div>
     </div>
-    <div class="empty-state mobile-only" v-if="filteredStudents.length === 0">
+    <div class="empty-state mobile-only" v-if="!loading && !loadError && filteredStudents.length === 0">
       <p>暂无学生数据</p>
       <div class="empty-actions">
-        <button class="btn btn-secondary" @click="showBatchModal = true">批量添加</button>
-        <button class="btn btn-primary" @click="openAddModal">添加第一个学生</button>
+        <OfficeButton class="btn btn-secondary" @click="showBatchModal = true">批量添加</OfficeButton>
+        <OfficeButton class="btn btn-primary" @click="openAddModal">添加第一个学生</OfficeButton>
       </div>
     </div>
 
+    <OfficeModal v-model:show="showStudentDetail"><div class="modal"><h2 class="modal-title">学生详情</h2><template v-if="detailStudent"><p>{{ detailStudent.name }} · {{ detailStudent.age || '未填写年龄' }}</p><p>电话：{{ detailStudent.phone || '未填写' }}</p><p>录入人：{{ creatorName(detailStudent) }}</p><p>{{ getStudentStatusText(detailStudent) }} · {{ detailStudent.enrollmentStage === 'pending' ? '待报名' : '已报名' }}</p><p>备注：{{ detailStudent.remark || '无' }}</p><p>总课时 {{ detailStudent.totalHours }} · 已用 {{ detailStudent.usedHours }}</p><div class="modal-actions"><OfficeButton class="btn btn-secondary" @click="detailStudent = null">关闭</OfficeButton><OfficeButton class="btn btn-primary" @click="goToHistory(detailStudent.id)">课时历史</OfficeButton></div></template></div></OfficeModal>
     <!-- 添加/编辑弹窗 -->
-    <div class="modal-overlay" v-if="showModal" @click.self="closeModal">
+    <OfficeModal v-model:show="showModal" @update:show="value => { if (!value) { closeModal() } }">
       <div class="modal">
         <h2 class="modal-title">{{ editingStudent ? '编辑学生' : '添加学生' }}</h2>
         <form @submit.prevent="saveStudent">
           <div class="form-group">
             <label>姓名 *</label>
-            <input type="text" class="input" v-model="form.name" required placeholder="请输入学生姓名" />
+            <OfficeInput type="text" class="input" v-model="form.name" required maxlength="100" placeholder="请输入学生姓名" />
           </div>
           <div class="form-group">
             <label>年龄</label>
-            <input type="number" class="input" v-model.number="form.age" min="1" max="100" placeholder="请输入学生年龄" />
+            <OfficeInput type="number" class="input" v-model.number="form.age" min="1" max="100" placeholder="请输入学生年龄" />
           </div>
           <div class="form-group">
             <label>联系电话</label>
-            <input type="tel" class="input" v-model="form.phone" placeholder="请输入家长联系电话" />
+            <OfficeInput type="tel" class="input" v-model="form.phone" maxlength="20" placeholder="请输入家长联系电话" />
           </div>
           <div class="form-group">
             <label>{{ editingStudent ? '初始课时' : '初始课时 *' }}</label>
-            <input
+            <OfficeInput
               type="number"
               class="input"
               v-model.number="form.totalHours"
@@ -148,18 +160,19 @@
           </div>
           <div class="form-group">
             <label>备注</label>
-            <textarea class="input" v-model="form.remark" rows="2" placeholder="特殊情况说明"></textarea>
+            <OfficeInput type="textarea" class="input" v-model="form.remark" rows="2" placeholder="特殊情况说明"></OfficeInput>
           </div>
+          <div class="form-group"><label>报名阶段</label><NSelect v-model:value="form.enrollmentStage" :options="enrollmentOptions" /></div>
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
+            <OfficeButton type="button" class="btn btn-secondary" @click="closeModal">取消</OfficeButton>
+            <OfficeButton type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</OfficeButton>
           </div>
         </form>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 批量添加弹窗 -->
-    <div class="modal-overlay" v-if="showBatchModal" @click.self="closeBatchModal">
+    <OfficeModal v-model:show="showBatchModal" @update:show="value => { if (!value) { closeBatchModal() } }">
       <div class="modal modal-lg">
         <h2 class="modal-title">批量添加学生</h2>
         <div class="batch-form">
@@ -170,29 +183,29 @@
           </div>
           <div class="batch-rows">
             <div class="batch-row" v-for="(row, index) in batchRows" :key="index">
-              <input type="text" class="input batch-col" v-model="row.name" placeholder="学生姓名" />
-              <input type="number" class="input batch-col" v-model.number="row.age" placeholder="年龄" min="1" max="100" />
-              <button type="button" class="btn btn-text batch-col action-col" @click="removeBatchRow(index)" :disabled="batchRows.length <= 1">删除</button>
+              <OfficeInput type="text" class="input batch-col" v-model="row.name" maxlength="100" placeholder="学生姓名" />
+              <OfficeInput type="number" class="input batch-col" v-model.number="row.age" placeholder="年龄" min="1" max="100" />
+              <OfficeButton type="button" class="btn btn-text batch-col action-col" @click="removeBatchRow(index)" :disabled="batchRows.length <= 1">删除</OfficeButton>
             </div>
           </div>
-          <button type="button" class="btn btn-secondary add-row-btn" @click="addBatchRow">+ 添加一行</button>
+          <OfficeButton type="button" class="btn btn-secondary add-row-btn" @click="addBatchRow">+ 添加一行</OfficeButton>
 
-          <div class="batch-options">
+          <div class="batch-options"><div class="form-group"><label>报名阶段</label><NSelect v-model:value="batchEnrollment" :options="enrollmentOptions" /></div>
             <div class="form-group">
               <label>默认课时</label>
-              <input type="number" class="input" v-model.number="batchDefaultHours" min="0" step="0.5" placeholder="默认0课时" />
+              <OfficeInput type="number" class="input" v-model.number="batchDefaultHours" min="0" step="0.5" placeholder="默认0课时" />
             </div>
           </div>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" @click="closeBatchModal">取消</button>
-          <button type="button" class="btn btn-primary" @click="saveBatchStudents" :disabled="!hasValidBatchData || submitting">{{ submitting ? '提交中...' : '确认添加' }}</button>
+          <OfficeButton type="button" class="btn btn-secondary" @click="closeBatchModal">取消</OfficeButton>
+          <OfficeButton type="button" class="btn btn-primary" @click="saveBatchStudents" :disabled="!hasValidBatchData || submitting">{{ submitting ? '提交中...' : '确认添加' }}</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 批量添加结果弹窗 -->
-    <div class="modal-overlay" v-if="showBatchResultModal">
+    <OfficeModal v-model:show="showBatchResultModal" @update:show="value => { if (!value) { showBatchResultModal = false } }">
       <div class="modal modal-sm">
         <h2 class="modal-title">批量添加结果</h2>
         <p style="font-size: 14px; margin-bottom: 12px;">成功添加 <strong>{{ batchResult.added }}</strong> 名学生</p>
@@ -201,13 +214,13 @@
           <p><strong>{{ batchResult.skipped.join('、') }}</strong></p>
         </div>
         <div class="modal-actions">
-          <button class="btn btn-primary" @click="showBatchResultModal = false">确定</button>
+          <OfficeButton class="btn btn-primary" @click="showBatchResultModal = false">确定</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 加减课时弹窗 -->
-    <div class="modal-overlay" v-if="showHoursModal" @click.self="closeHoursModal">
+    <OfficeModal v-model:show="showHoursModal" @update:show="value => { if (!value) { closeHoursModal() } }">
       <div class="modal">
         <h2 class="modal-title">加减课时</h2>
         <div class="hours-info">
@@ -220,7 +233,7 @@
             <span class="info-value">{{ hoursStudent ? (hoursStudent.totalHours || 0) - (hoursStudent.usedHours || 0) : 0 }} 课时</span>
           </div>
         </div>
-        <form @submit.prevent="saveAddHours">
+        <form @submit.prevent="saveAddHours" @input.capture="captureHoursInput">
           <div class="form-group">
             <label>操作类型 *</label>
             <div class="hours-type-options">
@@ -236,22 +249,22 @@
           </div>
           <div class="form-group">
             <label>{{ addHoursForm.type === 'add' ? '增加课时数' : '减少课时数' }} *</label>
-            <input type="number" class="input" v-model.number="addHoursForm.hours" required min="0.5" step="0.5" :placeholder="addHoursForm.type === 'add' ? '请输入要增加的课时数' : '请输入要减少的课时数'" />
+            <OfficeInput type="number" class="input hours-amount" v-model.number="addHoursForm.hours" required min="0.5" max="10000" step="0.5" :placeholder="addHoursForm.type === 'add' ? '请输入要增加的课时数' : '请输入要减少的课时数'" />
           </div>
           <div class="form-group">
             <label>备注</label>
-            <input type="text" class="input" v-model="addHoursForm.remark" :placeholder="addHoursForm.type === 'add' ? '如：续费20课时' : '如：输错修正'" />
+            <OfficeInput type="text" class="input" v-model="addHoursForm.remark" :placeholder="addHoursForm.type === 'add' ? '如：续费20课时' : '如：输错修正'" />
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="closeHoursModal">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '提交中...' : '确认' }}</button>
+            <OfficeButton type="button" class="btn btn-secondary" @click="closeHoursModal">取消</OfficeButton>
+            <OfficeButton type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '提交中...' : '确认' }}</OfficeButton>
           </div>
         </form>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 状态修改弹窗 -->
-    <div class="modal-overlay" v-if="showStatusModal" @click.self="closeStatusModal">
+    <OfficeModal v-model:show="showStatusModal" @update:show="value => { if (!value) { closeStatusModal() } }">
       <div class="modal modal-sm">
         <h2 class="modal-title">修改学生状态</h2>
         <div class="status-options">
@@ -267,23 +280,23 @@
           </button>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" @click="closeStatusModal">取消</button>
-          <button type="button" class="btn btn-primary" @click="saveStatus" :disabled="submitting">{{ submitting ? '提交中...' : '确认修改' }}</button>
+          <OfficeButton type="button" class="btn btn-secondary" @click="closeStatusModal">取消</OfficeButton>
+          <OfficeButton type="button" class="btn btn-primary" @click="saveStatus" :disabled="submitting">{{ submitting ? '提交中...' : '确认修改' }}</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 确认弹窗 -->
-    <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
+    <OfficeModal v-model:show="showConfirmModal" @update:show="value => { if (!value) { showConfirmModal = false } }">
       <div class="modal modal-sm">
         <h2 class="modal-title">{{ confirmData.title }}</h2>
         <p class="confirm-message" v-if="confirmData.message">{{ confirmData.message }}</p>
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-          <button class="btn btn-primary" :style="confirmData.danger ? 'background: var(--color-danger)' : ''" @click="handleConfirm">确认</button>
+          <OfficeButton class="btn btn-secondary" @click="showConfirmModal = false">取消</OfficeButton>
+          <OfficeButton class="btn btn-primary" :style="confirmData.danger ? 'background: var(--color-danger)' : ''" @click="handleConfirm" :disabled="submitting">{{ submitting ? '处理中...' : '确认' }}</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 移动端姓名提示 -->
     <div class="name-tip" v-if="nameTipVisible" :style="nameTipStyle" @click="nameTipVisible = false">{{ nameTipText }}</div>
@@ -291,14 +304,30 @@
 </template>
 
 <script setup>
+const detailStudent = ref(null)
+const showStudentDetail = computed({ get: () => !!detailStudent.value, set: value => { if (!value) detailStudent.value = null } })
+
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getStudents, addStudent, updateStudent, deleteStudent, updateStudentStatus, addStudentsBatch, addHours, subtractHours, checkStudentNameExists } from '../utils/storage'
+import { getStudents, getTeachers, addStudent, updateStudent, deleteStudent, updateStudentStatus, addStudentsBatch, addHours, subtractHours, checkStudentNameExists } from '../utils/storage'
 import { useToast } from '../composables/useToast'
+import { useAuthStore } from '../stores/auth.js'
+import { NSelect } from 'naive-ui'
 
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.isAdmin)
+const scopeFilter = ref('all')
+const showArchived = ref(false)
+const teachers = ref([])
+const enrollmentOptions = [{ label: '待报名（可预约试听）', value: 'pending' }, { label: '已报名', value: 'enrolled' }]
+function canEdit(student) { return isAdmin.value || auth.isTeacher && (student.createdBy === 'admin' || !!auth.teacherId && student.creatorId === auth.teacherId) }
+function canArchive(student) { return isAdmin.value || !!auth.teacherId && student.creatorId === auth.teacherId }
+function creatorName(student) { return student.createdBy === 'admin' ? '管理员' : (teachers.value.find(t => t.id === student.creatorId)?.name || '原录入教师') }
 const students = ref([])
+const loading = ref(true)
+const loadError = ref(false)
 const searchText = ref('')
 const showModal = ref(false)
 const showBatchModal = ref(false)
@@ -321,9 +350,11 @@ const form = ref({
   age: null,
   totalHours: 0,
   remark: ''
+  ,enrollmentStage: 'enrolled'
 })
 
 const batchRows = ref([{ name: '', age: null }])
+const batchEnrollment = ref('enrolled')
 const batchDefaultHours = ref(0)
 
 const addHoursForm = ref({
@@ -331,13 +362,32 @@ const addHoursForm = ref({
   hours: 1,
   remark: ''
 })
+const hoursRawInput = ref(null)
 
 const statusForm = ref({
   status: 'active'
 })
 
+let loadRequest = 0
+let loadErrorToast = null
 async function loadData() {
-  students.value = await getStudents() || []
+  const request = ++loadRequest
+  loading.value = true
+  loadError.value = false
+  try {
+    const [nextStudents, nextTeachers] = await Promise.all([getStudents(), getTeachers()])
+    if (request !== loadRequest) return
+    students.value = nextStudents
+    teachers.value = nextTeachers
+    toast.clearError(loadErrorToast)
+    loadErrorToast = null
+  } catch (error) {
+    if (request !== loadRequest) return
+    loadError.value = true
+    loadErrorToast = toast.error(error.message || '学生资料加载失败')
+  } finally {
+    if (request === loadRequest) loading.value = false
+  }
 }
 
 onMounted(loadData)
@@ -346,10 +396,11 @@ function handleVisibilityChange() {
   if (document.visibilityState === 'visible') loadData()
 }
 onMounted(() => document.addEventListener('visibilitychange', handleVisibilityChange))
-onUnmounted(() => document.removeEventListener('visibilitychange', handleVisibilityChange))
+onUnmounted(() => { loadRequest++; document.removeEventListener('visibilitychange', handleVisibilityChange) })
 
 const filteredStudents = computed(() => {
-  let result = students.value
+  let result = students.value.filter(s => (showArchived.value ? s.status === 'deleted' : s.status !== 'deleted') &&
+    (scopeFilter.value !== 'mine' || !!auth.teacherId && s.creatorId === auth.teacherId || isAdmin.value && s.createdBy === 'admin'))
 
   // 按姓名/电话搜索
   if (searchText.value) {
@@ -384,12 +435,13 @@ function getStudentStatusClass(student) {
 }
 
 function getStudentStatusText(student) {
-  if (student.status === 'deleted') return '已删除'
+  if (student.status === 'deleted') return '已归档'
   return student.status === 'quit' ? '退学' : '正常'
 }
 
 // 课时状态（自动计算）
 function getHoursStatusClass(student) {
+  if (student.enrollmentStage === 'pending') return 'badge-secondary'
   const remaining = (student.totalHours || 0) - (student.usedHours || 0)
   if (remaining < 0) return 'badge-danger'
   if (remaining === 0) return 'badge-danger'
@@ -398,6 +450,7 @@ function getHoursStatusClass(student) {
 }
 
 function getHoursStatusText(student) {
+  if (student.enrollmentStage === 'pending') return '试听阶段'
   const remaining = (student.totalHours || 0) - (student.usedHours || 0)
   if (remaining < 0) return `欠${Math.abs(remaining)}课时`
   if (remaining === 0) return '已耗尽'
@@ -407,20 +460,31 @@ function getHoursStatusText(student) {
 
 function openAddModal() {
   editingStudent.value = null
-  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '' }
+  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '', enrollmentStage: 'enrolled' }
   showModal.value = true
 }
 
 function editStudent(student) {
+  if (!canEdit(student)) return
   editingStudent.value = student
   form.value = { ...student }
   showModal.value = true
+}
+
+function upsertStudent(student) {
+  if (!student?.id) return
+  students.value = students.value.some(item => item.id === student.id)
+    ? students.value.map(item => item.id === student.id ? student : item)
+    : [student, ...students.value]
 }
 
 const submitting = ref(false)
 
 async function saveStudent() {
   if (submitting.value) return
+  const name = String(form.value.name ?? '').trim()
+  if (!name) return toast.error('请输入学生姓名')
+  form.value.name = name
   submitting.value = true
   try {
     // 检查重名
@@ -431,9 +495,10 @@ async function saveStudent() {
     }
 
     if (editingStudent.value) {
-      students.value = await updateStudent(editingStudent.value.id, form.value)
+      const { name, phone, age, remark, status, enrollmentStage } = form.value
+      upsertStudent(await updateStudent(editingStudent.value.id, { name, phone, age, remark, status, enrollmentStage }))
     } else {
-      students.value = await addStudent(form.value)
+      upsertStudent(await addStudent(form.value))
     }
     closeModal()
   } catch (err) {
@@ -444,6 +509,7 @@ async function saveStudent() {
 }
 
 function removeStudent(student) {
+  if (!canArchive(student)) return
   if (student.status === 'deleted') return
 
   const remaining = (student.totalHours || 0) - (student.usedHours || 0)
@@ -452,9 +518,12 @@ function removeStudent(student) {
     : ''
 
   confirmData.value = {
-    title: '删除学生',
-    message: `确定要删除学生"${student.name}"吗？\n${warning}删除后该学生的历史数据将保留，但无法进行任何操作。`,
-    onConfirm: async () => { students.value = await updateStudentStatus(student.id, 'deleted') },
+    title: '归档学生',
+    message: `确定归档学生"${student.name}"吗？\n${warning}归档后历史记录仍保留。`,
+    onConfirm: async () => {
+      await deleteStudent(student.id)
+      upsertStudent({ ...student, status: 'deleted' })
+    },
     danger: true
   }
   showConfirmModal.value = true
@@ -463,7 +532,7 @@ function removeStudent(student) {
 function closeModal() {
   showModal.value = false
   editingStudent.value = null
-  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '' }
+  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '', enrollmentStage: 'enrolled' }
 }
 
 // 批量添加
@@ -480,6 +549,7 @@ function removeBatchRow(index) {
 function closeBatchModal() {
   showBatchModal.value = false
   batchRows.value = [{ name: '', age: null }]
+  batchEnrollment.value = 'enrolled'
   batchDefaultHours.value = 0
 }
 
@@ -493,33 +563,8 @@ async function saveBatchStudents() {
 
   submitting.value = true
   try {
-    // 检查重名
-    const existingNames = []
-    for (const row of validRows) {
-      const exists = await checkStudentNameExists(row.name.trim())
-      if (exists) existingNames.push(row.name.trim())
-    }
-
-    // 检查批量输入内部是否有重复
-    const duplicateInBatch = []
-    const nameSet = new Set()
-    validRows.forEach(row => {
-      const name = row.name.trim()
-      if (nameSet.has(name)) duplicateInBatch.push(name)
-      nameSet.add(name)
-    })
-
-    if (existingNames.length > 0) {
-      toast.warning(`以下学生姓名已存在：${existingNames.join('、')}`)
-      return
-    }
-    if (duplicateInBatch.length > 0) {
-      toast.warning(`批量输入中存在重复姓名：${duplicateInBatch.join('、')}`)
-      return
-    }
-
-    const result = await addStudentsBatch(validRows, batchDefaultHours.value)
-    students.value = result.students
+    const result = await addStudentsBatch(validRows.map(row => ({ ...row, enrollmentStage: batchEnrollment.value })), batchDefaultHours.value)
+    if (Array.isArray(result.students)) students.value = result.students
     closeBatchModal()
     if (result.skipped && result.skipped.length > 0) {
       batchResult.value = { added: result.addedCount, skipped: result.skipped }
@@ -527,6 +572,7 @@ async function saveBatchStudents() {
     } else {
       toast.success(`成功添加 ${result.addedCount} 名学生`)
     }
+    if (result.refreshFailed) toast.warning('学生已添加，列表刷新失败，请稍后重试')
   } catch (err) {
     toast.error(err.message || '批量添加失败')
   } finally {
@@ -538,27 +584,36 @@ async function saveBatchStudents() {
 function openAddHoursModal(student) {
   hoursStudent.value = student
   addHoursForm.value = { type: 'add', hours: 1, remark: '' }
+  hoursRawInput.value = null
   showHoursModal.value = true
 }
 
 function closeHoursModal() {
   showHoursModal.value = false
   hoursStudent.value = null
+  hoursRawInput.value = null
+}
+
+function captureHoursInput(event) {
+  if (event.target?.closest?.('.hours-amount')) hoursRawInput.value = event.target.value
 }
 
 async function saveAddHours() {
-  if (!hoursStudent.value || addHoursForm.value.hours <= 0 || submitting.value) return
-  const h = Number(addHoursForm.value.hours)
-  addHoursForm.value.hours = h % 0.5 !== 0 ? Math.round(h * 2) / 2 : h
+  if (!hoursStudent.value || submitting.value) return
+  const h = Number(hoursRawInput.value ?? addHoursForm.value.hours)
+  if (!Number.isFinite(h) || h < 0.5 || h > 10000 || !Number.isInteger(h * 2)) {
+    toast.error('课时数须为 0.5 至 10000 之间的半课时倍数')
+    return
+  }
 
   submitting.value = true
   try {
     if (addHoursForm.value.type === 'add') {
-      students.value = await addHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
-      toast.success(`已为 ${hoursStudent.value.name} 增加 ${addHoursForm.value.hours} 课时`)
+      upsertStudent(await addHours(hoursStudent.value.id, h, addHoursForm.value.remark))
+      toast.success(`已为 ${hoursStudent.value.name} 增加 ${h} 课时`)
     } else {
-      students.value = await subtractHours(hoursStudent.value.id, addHoursForm.value.hours, addHoursForm.value.remark)
-      toast.success(`已为 ${hoursStudent.value.name} 减少 ${addHoursForm.value.hours} 课时`)
+      upsertStudent(await subtractHours(hoursStudent.value.id, h, addHoursForm.value.remark))
+      toast.success(`已为 ${hoursStudent.value.name} 减少 ${h} 课时`)
     }
     closeHoursModal()
   } catch (err) {
@@ -570,6 +625,7 @@ async function saveAddHours() {
 
 // 状态修改
 function openStatusMenu(student) {
+  if (!canEdit(student)) return
   statusStudent.value = student
   statusForm.value = { status: student.status || 'active' }
   showStatusModal.value = true
@@ -585,8 +641,9 @@ async function saveStatus() {
 
   submitting.value = true
   try {
-    students.value = await updateStudentStatus(statusStudent.value.id, statusForm.value.status)
+    upsertStudent(await updateStudentStatus(statusStudent.value.id, statusForm.value.status))
     closeStatusModal()
+    toast.success('学生状态已更新')
   } catch (err) {
     toast.error(err.message || '状态更新失败')
   } finally {
@@ -598,11 +655,23 @@ async function saveStatus() {
 const nameTipVisible = ref(false)
 const nameTipStyle = ref({})
 const nameTipText = ref('')
+const nameTipStudentId = ref(null)
+let nameTipTimer
+
+function openMobileStudent(student, event) {
+  if (nameTipVisible.value && nameTipStudentId.value === student.id) {
+    nameTipVisible.value = false
+    detailStudent.value = student
+    return
+  }
+  if (!showNameTip(student, event)) detailStudent.value = student
+}
 
 function showNameTip(student, event) {
   const el = event.target
-  if (el.scrollWidth <= el.clientWidth) return
+  if (el.scrollWidth <= el.clientWidth) return false
   nameTipText.value = student.name
+  nameTipStudentId.value = student.id
   const rect = el.getBoundingClientRect()
   nameTipStyle.value = {
     position: 'fixed',
@@ -611,14 +680,20 @@ function showNameTip(student, event) {
     transform: 'translateY(-100%)'
   }
   nameTipVisible.value = true
-  setTimeout(() => { nameTipVisible.value = false }, 3000)
+  clearTimeout(nameTipTimer)
+  nameTipTimer = setTimeout(() => { nameTipVisible.value = false }, 3000)
+  return true
 }
+onUnmounted(() => clearTimeout(nameTipTimer))
 
 async function handleConfirm() {
+  if (submitting.value) return
+  submitting.value = true
   try {
     await confirmData.value.onConfirm()
     showConfirmModal.value = false
-  } catch {}
+  } catch (error) { toast.error(error.message || '归档失败') }
+  finally { submitting.value = false }
 }
 
 // 跳转到课时历史
@@ -629,6 +704,9 @@ function goToHistory(studentId) {
 </script>
 
 <style scoped>
+.scope-filter { display: flex; gap: 6px; margin-bottom: 10px; }
+.scope-filter .selected { background: var(--color-selected); font-weight: 650; }
+.mobile-creator { display: block; color: var(--color-text-secondary); font-size: 11px; }
 .students {
   max-width: 1000px;
   margin: 0 auto;
@@ -668,6 +746,8 @@ function goToHistory(studentId) {
   overflow: hidden;
   box-shadow: var(--shadow-sm);
 }
+.table th, .table td { padding-inline: 10px; }
+.table th:nth-child(5), .table td:nth-child(5) { white-space: nowrap; }
 
 .empty-state {
   text-align: center;
@@ -731,11 +811,11 @@ function goToHistory(studentId) {
   opacity: 0.8;
 }
 
-.badge-info { background: rgba(0, 113, 227, 0.1); color: var(--color-primary); }
-.badge-secondary { background: rgba(142, 142, 147, 0.1); color: #8e8e93; }
-.badge-success { background: rgba(52, 199, 89, 0.1); color: var(--color-success); }
-.badge-warning { background: rgba(255, 149, 0, 0.1); color: var(--color-warning); }
-.badge-danger { background: rgba(255, 59, 48, 0.1); color: var(--color-danger); }
+.badge-info { background: rgba(65, 120, 185, 0.1); color: var(--color-primary); }
+.badge-secondary { background: rgba(99, 117, 138, 0.1); color: var(--color-text-secondary); }
+.badge-success { background: rgba(53, 124, 101, 0.1); color: var(--color-success); }
+.badge-warning { background: rgba(173, 108, 29, 0.1); color: var(--color-warning); }
+.badge-danger { background: rgba(179, 79, 80, 0.1); color: var(--color-danger); }
 
 .action-buttons {
   display: flex;
@@ -745,7 +825,7 @@ function goToHistory(studentId) {
 }
 
 .action-buttons .btn {
-  padding: 4px 8px;
+  padding: 4px 6px;
   font-size: 13px;
 }
 
@@ -897,12 +977,12 @@ function goToHistory(studentId) {
 
 .hours-type-btn.active.type-add {
   border-color: var(--color-success);
-  background: rgba(52, 199, 89, 0.05);
+  background: rgba(53, 124, 101, 0.05);
 }
 
 .hours-type-btn.active.type-subtract {
   border-color: var(--color-danger);
-  background: rgba(255, 59, 48, 0.05);
+  background: rgba(179, 79, 80, 0.05);
 }
 
 .type-sign {
@@ -959,7 +1039,7 @@ function goToHistory(studentId) {
 
 .status-option.active {
   border-color: var(--color-primary);
-  background: rgba(0, 113, 227, 0.05);
+  background: rgba(65, 120, 185, 0.05);
 }
 
 .status-icon {
@@ -1000,7 +1080,7 @@ function goToHistory(studentId) {
 
 .row-deleted td strong {
   text-decoration: line-through;
-  color: #8e8e93;
+  color: var(--color-text-secondary);
 }
 
 /* ===== 移动端卡片（默认隐藏）===== */
@@ -1014,32 +1094,30 @@ function goToHistory(studentId) {
 }
 
 .mobile-card {
-  display: flex;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
+  display: grid;
+  min-width: 0;
   border-bottom: 1px solid var(--color-border);
 }
 .mobile-card:last-child { border-bottom: none; }
-.mobile-card::-webkit-scrollbar { display: none; }
 
 .mobile-card-sticky {
-  position: sticky;
-  left: 0;
-  z-index: 1;
-  background: white;
-  padding: 12px 16px;
-  flex-shrink: 0;
-  min-width: 55%;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  column-gap: 8px;
+  padding: 12px 14px 8px;
 }
 
 .mobile-name {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font-family: inherit;
   font-size: 15px;
-  max-width: 5em;
+  font-weight: 700;
+  max-width: min(5em, 100%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1047,10 +1125,11 @@ function goToHistory(studentId) {
 }
 
 .mobile-right-info {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
+  gap: 6px;
 }
 
 .name-tip {
@@ -1078,16 +1157,17 @@ function goToHistory(studentId) {
 }
 
 .mobile-card-actions {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 2px;
-  padding: 8px 12px;
-  flex-shrink: 0;
+  padding: 3px 8px 5px;
+  border-top: 1px solid var(--color-border);
 }
+.mobile-card-actions .btn { min-width: 0; width: 100%; padding: 6px 2px; }
 
 .card-deleted .mobile-name {
   text-decoration: line-through;
-  color: #8e8e93;
+  color: var(--color-text-secondary);
 }
 
 .btn-danger-text {

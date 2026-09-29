@@ -10,8 +10,8 @@ module.exports = {
     restart_delay: 5000,
     watch: false,
     max_memory_restart: '512M',
-    out_file: '/home/song/www/edu-system/logs/out.log',
-    error_file: '/home/song/www/edu-system/logs/error.log',
+    out_file: '/d/www/win/edu-system/logs/out.log',
+    error_file: '/d/www/win/edu-system/logs/error.log',
     merge_logs: true,
     log_date_format: 'YYYY-MM-DD HH:mm:ss',
     env: {

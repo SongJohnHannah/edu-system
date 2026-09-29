@@ -5,6 +5,12 @@
       <p class="page-subtitle">管理您的账户信息</p>
     </div>
 
+    <div class="profile-section" v-if="loadingProfile">正在加载账户资料…</div>
+    <div class="profile-section" v-else-if="profileError">
+      <p>账户资料加载失败，请重试</p>
+      <OfficeButton class="btn btn-secondary" @click="loadProfile">重试</OfficeButton>
+    </div>
+    <template v-else>
     <div class="profile-card">
       <div class="profile-avatar">{{ (profile.displayName || '?').charAt(0) }}</div>
       <div class="profile-basic">
@@ -37,9 +43,9 @@
       <form @submit.prevent="handleUpdateName" class="profile-form">
         <div class="form-group">
           <label class="form-label">姓名</label>
-          <input type="text" class="input" v-model="nameForm.displayName" required />
+          <OfficeInput type="text" class="input" v-model="nameForm.displayName" required maxlength="100" />
         </div>
-        <button type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</button>
+        <OfficeButton type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? '保存中...' : '保存' }}</OfficeButton>
       </form>
     </div>
 
@@ -49,25 +55,26 @@
       <form @submit.prevent="handleChangePassword" class="profile-form">
         <div class="form-group">
           <label class="form-label">旧密码</label>
-          <input type="password" class="input" v-model="passwordForm.oldPassword" required autocomplete="current-password" />
+          <OfficeInput type="password" class="input" v-model="passwordForm.oldPassword" required autocomplete="current-password" />
         </div>
         <div class="form-group">
           <label class="form-label">新密码</label>
-          <input type="password" class="input" v-model="passwordForm.newPassword" required minlength="6" autocomplete="new-password" />
+          <OfficeInput type="password" class="input" v-model="passwordForm.newPassword" required minlength="6" autocomplete="new-password" />
         </div>
         <div class="form-group">
           <label class="form-label">确认新密码</label>
-          <input type="password" class="input" v-model="passwordForm.confirmPassword" required minlength="6" autocomplete="new-password" />
+          <OfficeInput type="password" class="input" v-model="passwordForm.confirmPassword" required minlength="6" autocomplete="new-password" />
         </div>
         <p class="form-error" v-if="passwordError">{{ passwordError }}</p>
-        <button type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? '保存中...' : '修改密码' }}</button>
+        <OfficeButton type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? '保存中...' : '修改密码' }}</OfficeButton>
       </form>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../utils/api.js'
 import { useAuthStore } from '../stores/auth.js'
@@ -78,31 +85,47 @@ const authStore = useAuthStore()
 const toast = useToast()
 
 const profile = ref({})
+const loadingProfile = ref(true)
+const profileError = ref(false)
 const saving = ref(false)
 const passwordError = ref('')
 
 const nameForm = ref({ displayName: '' })
 const passwordForm = ref({ oldPassword: '', newPassword: '', confirmPassword: '' })
 
-onMounted(async () => {
-  await loadProfile()
-})
+let loadRequest = 0
+let loadErrorToast = null
+onMounted(loadProfile)
+onUnmounted(() => { loadRequest++ })
 
 async function loadProfile() {
+  const request = ++loadRequest
+  loadingProfile.value = true
+  profileError.value = false
   try {
-    profile.value = await api.get('/auth/profile')
+    const loaded = await api.get('/auth/profile')
+    if (request !== loadRequest) return
+    profile.value = loaded
     nameForm.value.displayName = profile.value.displayName || ''
-  } catch {
-    router.push('/login')
-  }
+    toast.clearError(loadErrorToast)
+    loadErrorToast = null
+  } catch (error) {
+    if (request !== loadRequest) return
+    if (error.status === 401) { authStore.logout(); router.push('/login') }
+    else { profileError.value = true; loadErrorToast = toast.error(error.message || '账户资料加载失败') }
+  } finally { if (request === loadRequest) loadingProfile.value = false }
 }
 
 async function handleUpdateName() {
   if (saving.value) return
+  const displayName = String(nameForm.value.displayName ?? '').trim()
+  if (!displayName) return toast.error('姓名不能为空')
+  nameForm.value.displayName = displayName
   saving.value = true
   try {
     const updated = await api.put('/auth/profile', { displayName: nameForm.value.displayName })
     profile.value = updated
+    toast.success('个人资料已保存')
     if (authStore.user) {
       authStore.user.displayName = updated.displayName
       localStorage.setItem('user', JSON.stringify(authStore.user))
@@ -133,7 +156,9 @@ async function handleChangePassword() {
       newPassword: passwordForm.value.newPassword
     })
     passwordForm.value = { oldPassword: '', newPassword: '', confirmPassword: '' }
-    toast.success('密码修改成功')
+    toast.success('密码已修改，请重新登录')
+    authStore.logout()
+    router.push('/login')
   } catch (err) {
     passwordError.value = err.message || '修改失败'
   } finally {
@@ -155,7 +180,7 @@ async function handleChangePassword() {
   background: var(--color-bg);
   border-radius: var(--radius-lg);
   padding: 24px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 24px;
 }
 
@@ -189,20 +214,20 @@ async function handleChangePassword() {
 }
 
 .profile-role.admin {
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: #eaf5f0;
+  color: var(--color-success);
 }
 
 .profile-role.teacher {
-  background: #e3f2fd;
-  color: #1565c0;
+  background: #eaf3fc;
+  color: var(--color-primary);
 }
 
 .profile-section {
   background: var(--color-bg);
   border-radius: var(--radius-lg);
   padding: 24px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-sm);
   margin-bottom: 16px;
 }
 

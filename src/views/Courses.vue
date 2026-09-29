@@ -5,27 +5,33 @@
         <h1 class="page-title">排课管理</h1>
         <p class="page-subtitle">创建和管理课程安排</p>
       </div>
-      <button class="btn btn-primary" @click="showModal = true" :disabled="teachers.length === 0 || students.length === 0">
+      <OfficeButton class="btn btn-primary" @click="openCreate" :disabled="loading || loadError || !canCreateCourse">
         <span>+</span> 创建课程
-      </button>
+      </OfficeButton>
     </div>
 
-    <div class="tip" v-if="teachers.length === 0 || students.length === 0">
-      <p>请先添加{{ teachers.length === 0 ? '教师' : '' }}{{ teachers.length === 0 && students.length === 0 ? '和' : '' }}{{ students.length === 0 ? '学生' : '' }}后再创建课程</p>
+    <div class="tip" v-if="!loading && !loadError && !canCreateCourse">
+      <p>{{ createPrerequisite }}</p>
     </div>
 
-    <div class="search-bar" v-if="courses.length > 0">
+    <div class="search-bar" v-if="!loading && !loadError && courses.length > 0">
+      <div class="scope-filter"><OfficeButton class="btn btn-text" :class="{ selected: scopeFilter === 'all' }" @click="scopeFilter = 'all'">全部课程</OfficeButton><OfficeButton v-if="auth.teacherId" class="btn btn-text" :class="{ selected: scopeFilter === 'mine' }" @click="scopeFilter = 'mine'">我的课程</OfficeButton></div>
       <div class="search-row">
         <SearchSelect
           v-model="searchType"
           :options="searchTypeOptions"
           :searchable="false"
         />
-        <input type="text" class="input" v-model="courseSearchText" :placeholder="'搜索' + (searchTypeOptions.find(o => o.value === searchType)?.label || '') + '...'" />
+        <OfficeInput type="text" class="input" v-model="courseSearchText" :placeholder="'搜索' + (searchTypeOptions.find(o => o.value === searchType)?.label || '') + '...'" />
       </div>
     </div>
 
-    <div class="courses-list" v-if="filteredCourses.length > 0">
+    <div v-if="loading" class="empty-state" role="status">正在加载课程安排…</div>
+    <div v-else-if="loadError" class="empty-state" role="alert">
+      <p>课程资料加载失败，请重试</p>
+      <OfficeButton class="btn btn-secondary" @click="loadData">重试</OfficeButton>
+    </div>
+    <div class="courses-list" v-else-if="filteredCourses.length > 0">
       <div class="course-card" v-for="course in filteredCourses" :key="course.id">
         <div class="course-header">
           <h3 class="course-name">{{ course.name }}</h3>
@@ -52,31 +58,33 @@
           </div>
         </div>
         <div class="course-actions">
-          <button class="btn btn-text" @click="editCourse(course)">编辑</button>
-          <button class="btn btn-text" style="color: var(--color-danger)" @click="removeCourse(course.id)">删除</button>
+          <OfficeButton v-if="canEdit(course)" class="btn btn-text" @click="editCourse(course)">编辑</OfficeButton>
+          <OfficeButton v-if="canEdit(course)" class="btn btn-text" style="color: var(--color-danger)" @click="removeCourse(course.id)">归档</OfficeButton>
+          <span v-else class="read-only">只读</span>
         </div>
       </div>
     </div>
     <div class="empty-state" v-else>
       <p>暂无课程安排</p>
-      <button class="btn btn-primary" @click="showModal = true" :disabled="teachers.length === 0 || students.length === 0">创建第一门课程</button>
+      <OfficeButton class="btn btn-primary" @click="openCreate" :disabled="!canCreateCourse">创建第一门课程</OfficeButton>
     </div>
 
     <!-- 添加/编辑弹窗 -->
-    <div class="modal-overlay" v-if="showModal" @click.self="closeModal">
+    <OfficeModal v-model:show="showModal" @update:show="value => { if (!value) { closeModal() } }">
       <div class="modal">
         <h2 class="modal-title">{{ editingCourse ? '编辑课程' : '创建课程' }}</h2>
-        <form @submit.prevent="saveCourse">
+        <form @submit.prevent="saveCourse" @input.capture="captureHoursInput">
           <div class="form-group">
             <label>课程名称 *</label>
-            <input type="text" class="input" v-model="form.name" required placeholder="如：三年级数学提高班" />
+            <OfficeInput type="text" class="input" v-model="form.name" required maxlength="200" placeholder="如：三年级数学提高班" />
           </div>
           <div class="form-group">
             <label>授课教师 *</label>
             <SearchSelect
               v-model="form.teacherId"
-              :options="teachers.map(t => ({ value: t.id, label: t.name }))"
+              :options="activeTeachers.map(t => ({ value: t.id, label: t.name }))"
               placeholder="搜索或选择教师"
+              :disabled="!isAdmin || !!editingCourse"
             />
           </div>
           <div class="form-group">
@@ -86,6 +94,7 @@
               :options="weekdayOptions"
               placeholder="选择星期"
               :searchable="false"
+              :disabled="!!editingCourse"
             />
           </div>
           <div class="time-row">
@@ -96,6 +105,7 @@
                 :options="timeOptions"
                 placeholder="选择开始时间"
                 :searchable="false"
+                :disabled="!!editingCourse"
               />
             </div>
             <div class="form-group">
@@ -105,22 +115,24 @@
                 :options="timeOptions"
                 placeholder="选择结束时间"
                 :searchable="false"
+                :disabled="!!editingCourse"
               />
             </div>
           </div>
+          <p v-if="editingCourse" class="schedule-hint">日期和时间请到 <router-link to="/weekly-schedule" @click="closeModal">周排课</router-link> 中选择「仅这一次」或「从这次起每周」调整。</p>
           <div class="form-row">
             <div class="form-group">
               <label>每次课时</label>
-              <input type="number" class="input" v-model.number="form.hoursPerClass" min="0.5" step="0.5" />
+              <OfficeInput type="number" class="input hours-amount" v-model.number="form.hoursPerClass" min="0.5" max="999.5" step="0.5" />
             </div>
             <div class="form-group">
               <label>教室</label>
-              <input type="text" class="input" v-model="form.classroom" placeholder="如：A101" />
+              <OfficeInput type="text" class="input" v-model="form.classroom" maxlength="100" placeholder="如：A101" />
             </div>
           </div>
           <div class="form-group">
             <label>上课学生 *</label>
-            <input type="text" class="input student-search" v-model="studentSearchText" placeholder="搜索学生姓名..." />
+            <OfficeInput type="text" class="input student-search" v-model="studentSearchText" placeholder="搜索学生姓名..." />
             <div class="student-select">
               <button type="button" class="student-btn" v-for="s in filteredStudents" :key="s.id"
                 :class="{ selected: form.studentIds.includes(s.id) }"
@@ -130,24 +142,24 @@
             </div>
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
+            <OfficeButton type="button" class="btn btn-secondary" @click="closeModal">取消</OfficeButton>
+            <OfficeButton type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</OfficeButton>
           </div>
-        </form>
+        <p v-if="editingCourse && auth.isAdmin" class="form-hint"><router-link to="/teachers">前往教师信息办理课程交接</router-link></p></form>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 确认弹窗 -->
-    <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
+    <OfficeModal v-model:show="showConfirmModal" @update:show="value => { if (!value) { showConfirmModal = false } }">
       <div class="modal modal-sm">
-        <h2 class="modal-title">删除课程</h2>
-        <p class="confirm-message">确定要删除课程"{{ deleteTargetName }}"吗？</p>
+        <h2 class="modal-title">归档课程</h2>
+        <p class="confirm-message">确定归档课程“{{ deleteTargetName }}”吗？历史点名和课时会保留。</p>
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteCourse" :disabled="submitting">{{ submitting ? '删除中...' : '确认删除' }}</button>
+          <OfficeButton class="btn btn-secondary" @click="showConfirmModal = false">取消</OfficeButton>
+          <OfficeButton class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteCourse" :disabled="submitting">{{ submitting ? '归档中...' : '确认归档' }}</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
   </div>
 </template>
 
@@ -156,13 +168,29 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getCourses, addCourse, updateCourse, deleteCourse, getTeachers, getStudents } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 import SearchSelect from '../components/SearchSelect.vue'
+import { useAuthStore } from '../stores/auth.js'
 
 const toast = useToast()
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.isAdmin)
+const scopeFilter = ref('all')
+function canEdit(course) { return isAdmin.value || !!auth.teacherId && course.teacherId === auth.teacherId }
 const courses = ref([])
 const teachers = ref([])
 const students = ref([])
+const activeTeachers = computed(() => teachers.value.filter(t => t.status !== 'deleted'))
+const eligibleStudents = computed(() => students.value.filter(s => s.status === 'active' && s.enrollmentStage !== 'pending'))
+const canCreateCourse = computed(() => activeTeachers.value.length > 0 && eligibleStudents.value.length > 0)
+const createPrerequisite = computed(() => {
+  if (!activeTeachers.value.length && !eligibleStudents.value.length) return '请先添加或恢复教师，并录入已报名且在读的学生'
+  return !activeTeachers.value.length ? '请先添加或恢复教师' : '请先录入已报名且在读的学生'
+})
+const loading = ref(true)
+const loadError = ref(false)
 const showModal = ref(false)
 const editingCourse = ref(null)
+let modalVersion = 0
+const hoursRawInput = ref(null)
 const studentSearchText = ref('')
 const courseSearchText = ref('')
 const searchType = ref('course')
@@ -186,21 +214,38 @@ const form = ref({
   studentIds: []
 })
 
+let loadRequest = 0
+let loadErrorToast = null
 async function loadData() {
-  const [c, t, s] = await Promise.all([
-    getCourses(), getTeachers(), getStudents()
-  ])
-  courses.value = c || []
-  teachers.value = t || []
-  students.value = s || []
+  const request = ++loadRequest
+  loading.value = true
+  loadError.value = false
+  try {
+    const [c, t, s] = await Promise.all([
+      getCourses(), getTeachers(), getStudents()
+    ])
+    if (request !== loadRequest) return
+    courses.value = c || []
+    teachers.value = t || []
+    students.value = s || []
+    toast.clearError(loadErrorToast)
+    loadErrorToast = null
+  } catch (error) {
+    if (request !== loadRequest) return
+    loadError.value = true
+    loadErrorToast = toast.error(error.message || '课程资料加载失败')
+  } finally {
+    if (request === loadRequest) loading.value = false
+  }
 }
 
-onMounted(async () => {
-  await loadData()
+onMounted(() => {
+  loadData()
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
+  loadRequest++
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 
@@ -212,17 +257,16 @@ function handleVisibilityChange() {
 
 // 过滤学生列表
 const filteredStudents = computed(() => {
-  if (!studentSearchText.value) return students.value.filter(s => s.status === 'active')
+  if (!studentSearchText.value) return eligibleStudents.value
   const search = studentSearchText.value.toLowerCase()
-  return students.value.filter(s =>
-    s.name.toLowerCase().includes(search) && s.status === 'active'
-  )
+  return eligibleStudents.value.filter(s => s.name.toLowerCase().includes(search))
 })
 
 const filteredCourses = computed(() => {
-  if (!courseSearchText.value) return courses.value
+  const list = courses.value.filter(c => scopeFilter.value !== 'mine' || c.teacherId === auth.teacherId)
+  if (!courseSearchText.value) return list
   const search = courseSearchText.value.toLowerCase()
-  return courses.value.filter(c => {
+  return list.filter(c => {
     if (searchType.value === 'course') return c.name.toLowerCase().includes(search)
     if (searchType.value === 'teacher') return getTeacherName(c.teacherId).toLowerCase().includes(search)
     if (searchType.value === 'student') return getStudentNames(c.studentIds).toLowerCase().includes(search)
@@ -237,7 +281,7 @@ const timeOptions = []
 for (let h = 6; h <= 22; h++) {
   for (let m = 0; m < 60; m += 30) {
     const time = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
-    timeOptions.push({ value: time, label: time })
+    if (time >= '07:30' && time <= '22:30') timeOptions.push({ value: time, label: time })
   }
 }
 
@@ -267,12 +311,34 @@ function toggleStudent(id) {
 }
 
 function editCourse(course) {
+  if (!canEdit(course)) return
+  modalVersion++
   editingCourse.value = course
   form.value = { ...course, studentIds: [...(course.studentIds || [])] }
+  hoursRawInput.value = null
   showModal.value = true
 }
 
+function openCreate() {
+  modalVersion++
+  editingCourse.value = null
+  form.value.teacherId = auth.teacherId || activeTeachers.value[0]?.id || ''
+  hoursRawInput.value = null
+  showModal.value = true
+}
+
+function captureHoursInput(event) {
+  if (event.target?.closest?.('.hours-amount')) hoursRawInput.value = event.target.value
+}
+
 const submitting = ref(false)
+
+function upsertCourse(course) {
+  if (!course?.id) return
+  courses.value = courses.value.some(item => item.id === course.id)
+    ? courses.value.map(item => item.id === course.id ? course : item)
+    : [course, ...courses.value]
+}
 
 async function saveCourse() {
   if (submitting.value) return
@@ -281,35 +347,37 @@ async function saveCourse() {
     toast.error('结束时间必须晚于开始时间')
     return
   }
-  const hpc = Number(form.value.hoursPerClass)
-  if (!hpc || hpc <= 0) {
-    form.value.hoursPerClass = 1
-  } else if (hpc % 0.5 !== 0) {
-    form.value.hoursPerClass = Math.round(hpc * 2) / 2
+  const hpc = Number(hoursRawInput.value ?? form.value.hoursPerClass)
+  if (!Number.isFinite(hpc) || hpc < 0.5 || hpc > 999.5 || !Number.isInteger(hpc * 2)) {
+    toast.error('每次课时须为 0.5 至 999.5 的半课时倍数')
+    return
   }
-  if (form.value.hoursPerClass < 0.5) {
-    form.value.hoursPerClass = 0.5
-  }
+  form.value.hoursPerClass = hpc
 
+  const editing = editingCourse.value
+  const requestVersion = modalVersion
+  const submittedForm = { ...form.value, studentIds: [...form.value.studentIds] }
   submitting.value = true
   try {
-    if (editingCourse.value) {
-      // 编辑前刷新确认课程仍可操作（防止移交后编辑）
+    if (editing) {
+      // 编辑前刷新确认课程仍存在且归属未变。
       const freshCourses = await getCourses()
-      const stillExists = (freshCourses || []).find(c => c.id === editingCourse.value.id)
-      if (!stillExists) {
-        toast.error('该课程已移交，无法编辑')
+      const current = (freshCourses || []).find(c => c.id === editing.id)
+      if (!current || current.teacherId !== editing.teacherId || !canEdit(current)) {
         courses.value = freshCourses || []
-        closeModal()
+        if (requestVersion === modalVersion) {
+          closeModal()
+          toast.error(current ? '该课程已移交，无法编辑' : '该课程已归档，无法编辑')
+        }
         return
       }
-      courses.value = await updateCourse(editingCourse.value.id, form.value)
+      upsertCourse(await updateCourse(editing.id, submittedForm))
     } else {
-      courses.value = await addCourse(form.value)
+      upsertCourse(await addCourse(submittedForm))
     }
-    closeModal()
+    if (requestVersion === modalVersion) closeModal()
   } catch (err) {
-    toast.error(err.message || '保存失败')
+    if (requestVersion === modalVersion) toast.error(err.message || '保存失败')
   } finally {
     submitting.value = false
   }
@@ -327,7 +395,9 @@ async function confirmDeleteCourse() {
   if (submitting.value) return
   submitting.value = true
   try {
-    courses.value = await deleteCourse(deleteTargetId.value)
+    const archivedId = deleteTargetId.value
+    await deleteCourse(archivedId)
+    courses.value = courses.value.filter(course => course.id !== archivedId)
     showConfirmModal.value = false
   } catch (err) {
     toast.error(err.message || '删除失败')
@@ -337,8 +407,10 @@ async function confirmDeleteCourse() {
 }
 
 function closeModal() {
+  modalVersion++
   showModal.value = false
   editingCourse.value = null
+  hoursRawInput.value = null
   studentSearchText.value = ''
   form.value = {
     name: '',
@@ -379,7 +451,7 @@ function closeModal() {
 }
 
 .tip {
-  background: rgba(255, 149, 0, 0.1);
+  background: rgba(173, 108, 29, 0.1);
   color: var(--color-warning);
   padding: 16px 24px;
   border-radius: var(--radius-md);
@@ -389,6 +461,11 @@ function closeModal() {
 .search-bar {
   margin-bottom: 24px;
 }
+
+.scope-filter { display: flex; gap: 6px; margin-bottom: 12px; }
+.scope-filter .selected { background: var(--color-selected); font-weight: 650; }
+.read-only, .schedule-hint { color: var(--color-text-secondary); font-size: 13px; }
+.schedule-hint { margin: 2px 0 16px; }
 
 .search-row {
   display: flex;

@@ -2,30 +2,39 @@
   <div class="teachers fade-in">
     <div class="page-header">
       <div>
-        <h1 class="page-title">教师管理</h1>
-        <p class="page-subtitle">管理所有教师信息</p>
+        <h1 class="page-title">{{ isAdmin ? '教师管理' : '教师信息' }}</h1>
+        <p class="page-subtitle">查看教师与课程安排</p>
       </div>
-      <button class="btn btn-primary" @click="showModal = true">
+      <OfficeButton v-if="isAdmin" class="btn btn-primary" @click="showModal = true" :disabled="loading || loadError">
         <span>+</span> 添加教师
-      </button>
+      </OfficeButton>
     </div>
 
-    <div class="search-bar">
-      <input
+    <div v-if="loading" class="empty-state" role="status">正在加载教师资料…</div>
+    <div v-else-if="loadError" class="empty-state" role="alert">
+      <p>教师资料加载失败，请重试</p>
+      <OfficeButton class="btn btn-secondary" @click="loadData">重试</OfficeButton>
+    </div>
+    <div class="search-bar" v-if="!loading && !loadError">
+      <OfficeInput
         type="text"
         class="input"
         placeholder="搜索教师姓名..."
         v-model="searchText"
       />
     </div>
+    <div v-if="!loading && !loadError && auth.teacherId" class="scope-filter" role="group" aria-label="教师信息范围">
+      <OfficeButton type="button" class="btn btn-text" :class="{ selected: scopeFilter === 'all' }" @click="scopeFilter = 'all'">全部教师</OfficeButton>
+      <OfficeButton type="button" class="btn btn-text" :class="{ selected: scopeFilter === 'mine' }" @click="scopeFilter = 'mine'">我的信息</OfficeButton>
+    </div>
 
-    <div class="teachers-grid" v-if="filteredTeachers.length > 0">
+    <div class="teachers-grid" v-if="!loading && !loadError && filteredTeachers.length > 0">
       <div class="teacher-card" :class="{ 'card-deleted': teacher.status === 'deleted' }" v-for="teacher in filteredTeachers" :key="teacher.id">
         <div class="teacher-avatar">{{ (teacher.name || '?').charAt(0) }}</div>
         <div class="teacher-info">
           <h3 class="teacher-name">
             {{ teacher.name }}
-            <span class="badge badge-danger" v-if="teacher.status === 'deleted'">已删除</span>
+            <span class="badge badge-danger" v-if="teacher.status === 'deleted'">已停用</span>
           </h3>
           <p class="teacher-subject" v-if="teacher.subject">{{ teacher.subject }}</p>
           <p class="teacher-phone" v-if="teacher.phone">{{ teacher.phone }}</p>
@@ -33,111 +42,111 @@
         <div class="teacher-meta">
           <span class="course-count">{{ getCourseCount(teacher.id) }} 门课程</span>
         </div>
-        <div class="teacher-actions" v-if="teacher.status !== 'deleted'">
-          <button class="btn btn-text" @click="editTeacher(teacher)">编辑</button>
-          <button class="btn btn-text" v-if="isAdmin && useApi" @click="openHandoverModal(teacher)">交接课程</button>
-          <button class="btn btn-text" v-if="isAdmin && teacher.userId" @click="openAccountModal(teacher)">账户</button>
-          <button class="btn btn-text" style="color: var(--color-danger)" @click="removeTeacher(teacher.id)">删除</button>
+        <div class="teacher-actions" v-if="teacher.status !== 'deleted' && isAdmin">
+          <OfficeButton class="btn btn-text" @click="editTeacher(teacher)">编辑</OfficeButton>
+          <OfficeButton class="btn btn-text" v-if="isAdmin" @click="openHandoverModal(teacher)">交接课程</OfficeButton>
+          <OfficeButton class="btn btn-text" v-if="isAdmin && teacher.userId" @click="openAccountModal(teacher)">账户</OfficeButton>
+          <OfficeButton class="btn btn-text" style="color: var(--color-danger)" @click="removeTeacher(teacher.id)">停用</OfficeButton>
         </div>
         <div class="teacher-actions" v-else>
-          <button class="btn btn-text" style="color: var(--color-success)" @click="restoreTeacher(teacher.id)" v-if="isAdmin">恢复</button>
+          <OfficeButton class="btn btn-text" style="color: var(--color-success)" @click="restoreTeacher(teacher.id)" v-if="isAdmin">恢复</OfficeButton>
         </div>
       </div>
     </div>
-    <div class="empty-state" v-else>
-      <p>暂无教师数据</p>
-      <button class="btn btn-primary" @click="showModal = true">添加第一位教师</button>
+    <div class="empty-state" v-else-if="!loading && !loadError">
+      <p>{{ teachers.length ? '没有符合条件的教师' : '暂无教师数据' }}</p>
+      <OfficeButton v-if="isAdmin && !teachers.length" class="btn btn-primary" @click="showModal = true">添加第一位教师</OfficeButton>
     </div>
 
     <!-- 添加/编辑弹窗 -->
-    <div class="modal-overlay" v-if="showModal" @click.self="closeModal">
+    <OfficeModal v-model:show="showModal" @update:show="value => { if (!value) { closeModal() } }">
       <div class="modal">
         <h2 class="modal-title">{{ editingTeacher ? '编辑教师' : '添加教师' }}</h2>
         <form @submit.prevent="saveTeacher">
           <div class="form-group">
             <label>姓名 *</label>
-            <input type="text" class="input" v-model="form.name" required placeholder="请输入教师姓名" />
+            <OfficeInput type="text" class="input" v-model="form.name" required maxlength="100" placeholder="请输入教师姓名" />
           </div>
           <div class="form-group">
             <label>联系电话</label>
-            <input type="tel" class="input" v-model="form.phone" placeholder="请输入联系电话" />
+            <OfficeInput type="tel" class="input" v-model="form.phone" maxlength="20" placeholder="请输入联系电话" />
           </div>
           <div class="form-group">
             <label>教授科目</label>
-            <input type="text" class="input" v-model="form.subject" placeholder="如：数学、英语" />
+            <OfficeInput type="text" class="input" v-model="form.subject" maxlength="100" placeholder="如：数学、英语" />
           </div>
           <div class="form-group">
             <label>备注</label>
-            <textarea class="input" v-model="form.remark" rows="3" placeholder="其他说明"></textarea>
+            <OfficeInput type="textarea" class="input" v-model="form.remark" rows="3" placeholder="其他说明"></OfficeInput>
           </div>
           <div class="form-hint" v-if="!editingTeacher">
-            添加教师后将自动创建登录账号，默认密码：<strong>123456</strong>
+            添加教师后将自动生成一次性初始密码，请在创建成功后及时保存。
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="closeModal">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
+            <OfficeButton type="button" class="btn btn-secondary" @click="closeModal">取消</OfficeButton>
+            <OfficeButton type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</OfficeButton>
           </div>
         </form>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 确认弹窗 -->
-    <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
+    <OfficeModal v-model:show="showConfirmModal" @update:show="value => { if (!value) { showConfirmModal = false } }">
       <div class="modal modal-sm">
-        <h2 class="modal-title">删除教师</h2>
-        <p class="confirm-message">确定要删除教师"{{ deleteTargetName }}"吗？</p>
+        <h2 class="modal-title">停用教师</h2>
+        <p class="confirm-message">确定要停用教师“{{ deleteTargetName }}”的登录账号吗？</p>
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-          <button class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteTeacher" :disabled="submitting">{{ submitting ? '删除中...' : '确认删除' }}</button>
+          <OfficeButton class="btn btn-secondary" @click="showConfirmModal = false">取消</OfficeButton>
+          <OfficeButton class="btn btn-primary" style="background: var(--color-danger)" @click="confirmDeleteTeacher" :disabled="submitting">{{ submitting ? '停用中...' : '确认停用' }}</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 账户管理弹窗 -->
-    <div class="modal-overlay" v-if="showAccountModal" @click.self="showAccountModal = false">
+    <OfficeModal v-model:show="showAccountModal" @update:show="value => { if (!value) { showAccountModal = false } }">
       <div class="modal">
         <h2 class="modal-title">教师账户管理</h2>
         <form @submit.prevent="saveAccount">
           <div class="form-group">
             <label>姓名</label>
-            <input type="text" class="input" v-model="accountForm.displayName" required />
+            <OfficeInput type="text" class="input" v-model="accountForm.displayName" required maxlength="100" />
           </div>
           <div class="form-group">
             <label>手机号</label>
-            <input type="tel" class="input" v-model="accountForm.phone" />
+            <OfficeInput type="tel" class="input" v-model="accountForm.phone" maxlength="20" />
           </div>
           <div class="form-group">
             <label>重置密码（留空则不修改）</label>
-            <input type="password" class="input" v-model="accountForm.newPassword" placeholder="输入新密码（至少6位）" minlength="6" />
+            <OfficeInput type="password" class="input" v-model="accountForm.newPassword" placeholder="输入新密码（至少6位）" minlength="6" />
           </div>
           <div class="modal-actions">
-            <button type="button" class="btn btn-secondary" @click="showAccountModal = false">取消</button>
-            <button type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</button>
+            <OfficeButton type="button" class="btn btn-secondary" @click="showAccountModal = false">取消</OfficeButton>
+            <OfficeButton type="submit" class="btn btn-primary" :disabled="submitting">{{ submitting ? '保存中...' : '保存' }}</OfficeButton>
           </div>
         </form>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 创建成功提示弹窗 -->
-    <div class="modal-overlay" v-if="showSuccessModal">
+    <OfficeModal v-model:show="showSuccessModal" @update:show="value => { if (!value) { showSuccessModal = false } }">
       <div class="modal modal-sm">
         <h2 class="modal-title">教师创建成功</h2>
         <div class="success-info">
           <p>已为该教师创建登录账号：</p>
           <div class="success-detail">
             <div class="success-row"><span class="success-label">登录账号</span><span class="success-value">{{ successInfo.username }}</span></div>
-            <div class="success-row"><span class="success-label">默认密码</span><span class="success-value success-password">{{ successInfo.password }}</span></div>
+            <div class="success-row"><span class="success-label">初始密码</span><span class="success-value success-password">{{ successInfo.password }}</span></div>
           </div>
           <p class="success-hint">请告知教师及时修改密码</p>
         </div>
         <div class="modal-actions">
-          <button class="btn btn-primary" @click="showSuccessModal = false">知道了</button>
+          <OfficeButton class="btn btn-primary" @click="showSuccessModal = false">知道了</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
 
     <!-- 课程交接弹窗 -->
-    <div class="modal-overlay" v-if="showHandoverModal" @click.self="showHandoverModal = false">
+    <OfficeModal v-model:show="showHandoverModal" @update:show="value => { if (!value) { showHandoverModal = false } }">
       <div class="modal">
         <h2 class="modal-title">课程交接</h2>
         <div class="handover-info">
@@ -162,41 +171,45 @@
           <label>交接给</label>
           <SearchSelect
             v-model="handoverTargetTeacherId"
-            :options="teachers.filter(t => t.id !== handoverTeacher?.id).map(t => ({ value: t.id, label: t.name }))"
+            :options="teachers.filter(t => t.id !== handoverTeacher?.id && t.status === 'active').map(t => ({ value: t.id, label: t.name }))"
             placeholder="请选择教师"
           />
         </div>
         <div class="form-group">
           <label>交接原因（选填）</label>
-          <textarea class="input" v-model="handoverReason" rows="2" placeholder="如：教师离职、课程调整等"></textarea>
+          <OfficeInput type="textarea" class="input" v-model="handoverReason" rows="2" placeholder="如：教师离职、课程调整等"></OfficeInput>
         </div>
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showHandoverModal = false">取消</button>
-          <button class="btn btn-primary" @click="confirmHandover" :disabled="!handoverTargetTeacherId || handoverSelectedCourses.length === 0 || handoverSubmitting">
+          <OfficeButton class="btn btn-secondary" @click="showHandoverModal = false">取消</OfficeButton>
+          <OfficeButton class="btn btn-primary" @click="confirmHandover" :disabled="!handoverTargetTeacherId || handoverSelectedCourses.length === 0 || handoverSubmitting">
             {{ handoverSubmitting ? '交接中...' : '确认交接' }}
-          </button>
+          </OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { getTeachers, addTeacher, updateTeacher, deleteTeacher, updateTeacherStatus } from '../utils/storage'
 import { getCourses } from '../utils/storage'
 import { performHandover } from '../utils/storage'
 import { api } from '../utils/api.js'
 import { useToast } from '../composables/useToast'
+import { useAuthStore } from '../stores/auth.js'
 import SearchSelect from '../components/SearchSelect.vue'
 
-const useApi = import.meta.env.VITE_USE_API === 'true'
-const isAdmin = ref(false)
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.isAdmin)
 const toast = useToast()
 
 const teachers = ref([])
 const courses = ref([])
+const loading = ref(true)
+const loadError = ref(false)
 const searchText = ref('')
+const scopeFilter = ref('all')
 const showModal = ref(false)
 const editingTeacher = ref(null)
 const showConfirmModal = ref(false)
@@ -218,25 +231,34 @@ const accountForm = ref({
   newPassword: ''
 })
 
-onMounted(async () => {
-  const [t, c] = await Promise.all([getTeachers(), getCourses()])
-  teachers.value = t || []
-  courses.value = c || []
-  if (useApi) {
-    const userStr = localStorage.getItem('user')
-    if (userStr) {
-      try {
-        const user = JSON.parse(userStr)
-        isAdmin.value = user.role === 'admin'
-      } catch {}
-    }
+let loadRequest = 0
+let loadErrorToast = null
+async function loadData() {
+  const request = ++loadRequest
+  loading.value = true
+  loadError.value = false
+  try {
+    const [t, c] = await Promise.all([getTeachers(), getCourses()])
+    if (request !== loadRequest) return
+    teachers.value = t || []
+    courses.value = c || []
+    toast.clearError(loadErrorToast)
+    loadErrorToast = null
+  } catch (error) {
+    if (request !== loadRequest) return
+    loadError.value = true
+    loadErrorToast = toast.error(error.message || '教师资料加载失败')
+  } finally {
+    if (request === loadRequest) loading.value = false
   }
-})
+}
+onMounted(loadData)
+onUnmounted(() => { loadRequest++ })
 
 const filteredTeachers = computed(() => {
-  if (!searchText.value) return teachers.value
-  const search = searchText.value.toLowerCase()
-  return teachers.value.filter(t => t.name.toLowerCase().includes(search))
+  const search = searchText.value.trim().toLowerCase()
+  return teachers.value.filter(t => (scopeFilter.value !== 'mine' || t.id === auth.teacherId) &&
+    (!search || t.name.toLowerCase().includes(search)))
 })
 
 function getCourseCount(teacherId) {
@@ -251,20 +273,32 @@ function editTeacher(teacher) {
 
 const submitting = ref(false)
 
+function upsertTeacher(teacher) {
+  if (!teacher?.id) return
+  const previous = teachers.value.find(item => item.id === teacher.id)
+  teachers.value = previous
+    ? teachers.value.map(item => item.id === teacher.id ? { ...item, ...teacher } : item)
+    : [teacher, ...teachers.value]
+}
+
 async function saveTeacher() {
   if (submitting.value) return
+  const name = String(form.value.name ?? '').trim()
+  if (!name) return toast.error('请输入教师姓名')
+  form.value.name = name
   submitting.value = true
   try {
     if (editingTeacher.value) {
-      teachers.value = await updateTeacher(editingTeacher.value.id, form.value)
+      upsertTeacher(await updateTeacher(editingTeacher.value.id, form.value))
     } else {
       const result = await addTeacher(form.value)
-      teachers.value = result.teachers || result
-      // API 模式下显示默认密码
-      if (useApi && result.defaultPassword) {
+      if (Array.isArray(result.teachers)) teachers.value = result.teachers
+      else if (result.createdTeacher) teachers.value = [...teachers.value, result.createdTeacher]
+      if (result.defaultPassword) {
         successInfo.value = { username: result.username, password: result.defaultPassword }
         showSuccessModal.value = true
       }
+      if (result.refreshFailed) toast.warning('教师已创建，列表刷新失败，请稍后重试')
     }
     closeModal()
   } catch (err) {
@@ -286,10 +320,10 @@ async function confirmDeleteTeacher() {
   if (submitting.value) return
   submitting.value = true
   try {
-    teachers.value = await updateTeacherStatus(deleteTargetId.value, 'deleted')
+    upsertTeacher(await updateTeacherStatus(deleteTargetId.value, 'deleted'))
     showConfirmModal.value = false
   } catch (err) {
-    toast.error(err.message || '删除失败')
+    toast.error(err.message || '停用失败')
   } finally {
     submitting.value = false
   }
@@ -297,7 +331,7 @@ async function confirmDeleteTeacher() {
 
 async function restoreTeacher(id) {
   try {
-    teachers.value = await updateTeacherStatus(id, 'active')
+    upsertTeacher(await updateTeacherStatus(id, 'active'))
     toast.success('教师已恢复')
   } catch (err) {
     toast.error(err.message || '恢复失败')
@@ -319,12 +353,17 @@ async function saveAccount() {
   submitting.value = true
   try {
     const { userId, displayName, phone, newPassword } = accountForm.value
-    await api.put(`/auth/users/${userId}`, { displayName, phone })
+    const profile = await api.put(`/auth/users/${userId}`, { displayName, phone })
+    teachers.value = teachers.value.map(teacher => teacher.userId === userId
+      ? { ...teacher, name: profile.teacher?.name ?? profile.displayName, phone: profile.teacher?.phone ?? phone.trim() }
+      : teacher)
     if (newPassword && newPassword.length >= 6) {
-      await api.put(`/auth/users/${userId}/password`, { newPassword })
+      try { await api.put(`/auth/users/${userId}/password`, { newPassword }) }
+      catch (error) { toast.warning(`教师资料已保存，但密码重置失败：${error.message || '请重试'}`); return }
     }
     showAccountModal.value = false
-    teachers.value = await getTeachers() || []
+    try { teachers.value = await getTeachers() || [] }
+    catch { toast.warning('教师账户已保存，列表刷新失败，请稍后重试') }
   } catch (err) {
     toast.error(err.message || '保存失败')
   } finally {
@@ -354,15 +393,21 @@ async function confirmHandover() {
   if (handoverSubmitting.value) return
   handoverSubmitting.value = true
   try {
-    for (const courseId of handoverSelectedCourses.value) {
+    const completed = []
+    for (const courseId of [...handoverSelectedCourses.value]) {
       await performHandover(courseId, handoverTargetTeacherId.value, handoverReason.value)
+      completed.push(courseId)
+      handoverSelectedCourses.value = handoverSelectedCourses.value.filter(id => id !== courseId)
+      courses.value = courses.value.map(course => course.id === courseId ? { ...course, teacherId: handoverTargetTeacherId.value } : course)
     }
-    toast.success(`已成功交接 ${handoverSelectedCourses.value.length} 门课程`)
+    toast.success(`已成功交接 ${completed.length} 门课程`)
     showHandoverModal.value = false
-    teachers.value = await getTeachers() || []
-    courses.value = await getCourses() || []
+    try {
+      teachers.value = await getTeachers() || []
+      courses.value = await getCourses() || []
+    } catch { toast.warning('课程已交接，列表刷新失败，请稍后重试') }
   } catch (err) {
-    toast.error(err.message || '交接失败')
+    toast.error((err.message || '交接失败') + '；已完成的课程已从待交接列表移除，其余课程未改变')
   } finally {
     handoverSubmitting.value = false
   }
@@ -401,13 +446,20 @@ function closeModal() {
 }
 
 .search-bar {
-  margin-bottom: 24px;
+  margin-bottom: 12px;
 }
+
+.scope-filter { display: flex; gap: 6px; margin-bottom: 20px; }
+.scope-filter .selected { background: var(--color-selected); font-weight: 650; }
 
 .teachers-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 20px;
+}
+
+@media (max-width: 1100px) {
+  .teachers-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .teacher-card {
@@ -426,8 +478,8 @@ function closeModal() {
   width: 56px;
   height: 56px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--color-primary), #00c7be);
-  color: white;
+  background: var(--color-selected);
+  color: var(--color-primary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -604,9 +656,6 @@ function closeModal() {
 }
 
 @media (max-width: 768px) {
-  .teachers-grid {
-    grid-template-columns: 1fr;
-  }
   .modal {
     margin: 16px;
     padding: 24px;
@@ -617,6 +666,19 @@ function closeModal() {
   .modal-actions .btn {
     width: 100%;
   }
+}
+
+@media (max-width: 640px) {
+  .teachers-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 359px) {
+  .teacher-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .teacher-actions .n-button { width: 100%; }
 }
 
 .handover-info {
@@ -685,7 +747,7 @@ function closeModal() {
 }
 
 .badge-danger {
-  background: #fee2e2;
-  color: #dc2626;
+  background: #fceeee;
+  color: var(--color-danger);
 }
 </style>

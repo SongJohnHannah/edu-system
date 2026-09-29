@@ -2,14 +2,17 @@
   <div class="hours-history fade-in">
     <div class="page-header">
       <div>
-        <button class="btn btn-secondary back-btn" @click="goBack">
+        <OfficeButton class="btn btn-secondary back-btn" @click="goBack">
           ← 返回学生列表
-        </button>
+        </OfficeButton>
         <h1 class="page-title">{{ student?.name || '学生' }} - 课时记录</h1>
         <p class="page-subtitle">查看该学生的所有课时变更记录</p>
       </div>
     </div>
 
+    <div v-if="loading" class="empty-state" role="status">正在加载课时历史…</div>
+    <div v-else-if="loadError" class="empty-state" role="alert"><p>课时历史加载失败，请重试</p><OfficeButton class="btn btn-secondary" @click="loadHistory">重试</OfficeButton></div>
+    <template v-else>
     <div class="stats-card" v-if="student">
       <div class="stat-item">
         <span class="stat-label">总课时</span>
@@ -58,13 +61,14 @@
     </div>
 
     <div class="table-container">
-      <table class="table" v-if="filteredRecords.length > 0">
+      <template v-if="filteredRecords.length > 0">
+      <OfficeTable class="table history-table">
         <thead>
           <tr>
             <th>日期</th>
             <th>类型</th>
             <th>课时</th>
-            <th>备注</th>
+            <th>备注</th><th>操作人</th>
           </tr>
         </thead>
         <tbody>
@@ -78,46 +82,84 @@
             <td :class="getHoursClass(record.type)">
               {{ (record.type === 'deduct' || record.type === 'subtract') ? '-' : '+' }}{{ record.hours ?? 0 }}
             </td>
-            <td>{{ record.remark || '-' }}</td>
+            <td>{{ record.remark || '-' }}</td><td>{{ record.operator || '历史记录未提供' }}</td>
           </tr>
         </tbody>
-      </table>
+      </OfficeTable>
+      <div class="history-mobile-list">
+        <article v-for="record in filteredRecords" :key="record.id" class="history-mobile-card">
+          <dl>
+            <div><dt>日期</dt><dd>{{ formatDate(record.createdAt) }}</dd></div>
+            <div><dt>类型</dt><dd><span class="badge" :class="getTypeClass(record.type)">{{ getTypeText(record.type) }}</span></dd></div>
+            <div><dt>课时</dt><dd :class="getHoursClass(record.type)">{{ (record.type === 'deduct' || record.type === 'subtract') ? '-' : '+' }}{{ record.hours ?? 0 }}</dd></div>
+            <div><dt>备注</dt><dd>{{ record.remark || '-' }}</dd></div>
+            <div><dt>操作人</dt><dd>{{ record.operator || '历史记录未提供' }}</dd></div>
+          </dl>
+        </article>
+      </div>
+      </template>
       <div class="empty-state" v-else>
-        <p>该学生暂无课时记录</p>
+        <p>{{ filterType ? '该类型暂无课时记录' : '该学生暂无课时记录' }}</p>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getStudents, getHourRecordsByStudent } from '../utils/storage'
 import SearchSelect from '../components/SearchSelect.vue'
+import { useToast } from '../composables/useToast.js'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 const student = ref(null)
 const records = ref([])
 const filterType = ref('')
+const loading = ref(true)
+const loadError = ref(false)
+let loadRequestId = 0
+let loadErrorToast = null
 
-onMounted(async () => {
+async function loadHistory() {
+  const requestId = ++loadRequestId
   const studentId = route.query.studentId
   if (!studentId) {
+    loading.value = false
     router.push('/students')
     return
   }
 
-  const students = await getStudents() || []
-  student.value = students.find(s => s.id === studentId)
-
-  if (!student.value) {
-    router.push('/students')
-    return
-  }
-
-  records.value = await getHourRecordsByStudent(studentId) || []
-})
+  loading.value = true
+  loadError.value = false
+  student.value = null
+  records.value = []
+  try {
+    const students = await getStudents() || []
+    if (requestId !== loadRequestId) return
+    const selectedStudent = students.find(s => s.id === studentId)
+    if (!selectedStudent) {
+      router.push('/students')
+      return
+    }
+    const loadedRecords = await getHourRecordsByStudent(studentId) || []
+    if (requestId !== loadRequestId) return
+    student.value = selectedStudent
+    records.value = loadedRecords
+    toast.clearError(loadErrorToast)
+    loadErrorToast = null
+  } catch (error) {
+    if (requestId !== loadRequestId) return
+    records.value = []
+    loadError.value = true
+    loadErrorToast = toast.error(error.message || '课时历史加载失败')
+  } finally { if (requestId === loadRequestId) loading.value = false }
+}
+watch(() => route.query.studentId, () => { filterType.value = ''; loadHistory() }, { immediate: true })
+onUnmounted(() => { loadRequestId++ })
 
 const filteredRecords = computed(() => {
   if (!filterType.value) return records.value
@@ -150,7 +192,7 @@ const totalRestored = computed(() => {
 
 function formatDate(timestamp) {
   if (!timestamp) return '-'
-  const date = new Date(timestamp)
+  const date = new Date(typeof timestamp === 'string' ? timestamp.replace(' ', 'T') : timestamp)
   if (isNaN(date.getTime())) return '-'
   return date.toLocaleDateString('zh-CN', {
     year: 'numeric',
@@ -334,11 +376,11 @@ function goBack() {
   font-weight: 500;
 }
 
-.badge-success { background: rgba(52, 199, 89, 0.1); color: var(--color-success); }
-.badge-warning { background: rgba(255, 149, 0, 0.1); color: var(--color-warning); }
-.badge-danger { background: rgba(255, 59, 48, 0.1); color: var(--color-danger); }
-.badge-info { background: rgba(0, 113, 227, 0.1); color: var(--color-primary); }
-.badge-secondary { background: rgba(142, 142, 147, 0.1); color: #8e8e93; }
+.badge-success { background: rgba(53, 124, 101, 0.1); color: var(--color-success); }
+.badge-warning { background: rgba(173, 108, 29, 0.1); color: var(--color-warning); }
+.badge-danger { background: rgba(179, 79, 80, 0.1); color: var(--color-danger); }
+.badge-info { background: rgba(65, 120, 185, 0.1); color: var(--color-primary); }
+.badge-secondary { background: rgba(99, 117, 138, 0.1); color: var(--color-text-secondary); }
 
 .hours-add {
   color: var(--color-success);
@@ -348,6 +390,26 @@ function goBack() {
 .hours-deduct {
   color: var(--color-danger);
   font-weight: 600;
+}
+
+.history-mobile-list { display: none; }
+
+@media (min-width: 600px) and (max-width: 900px) {
+  .hours-history .history-table { display: table; width: 100%; table-layout: fixed; overflow: visible; }
+  .history-table th, .history-table td { white-space: normal; overflow-wrap: anywhere; }
+}
+
+@media (max-width: 599px) {
+  .table-container { background: transparent; overflow: visible; box-shadow: none; }
+  .history-table { display: none; }
+  .history-mobile-list { display: grid; gap: 10px; }
+  .history-mobile-card { padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: #fff; box-shadow: var(--shadow-sm); }
+  .history-mobile-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin: 0; }
+  .history-mobile-card dl > div { min-width: 0; }
+  .history-mobile-card dl > div:first-child { grid-column: 1 / -1; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); }
+  .history-mobile-card dt { margin-bottom: 4px; color: var(--color-text-secondary); font-size: 11px; }
+  .history-mobile-card dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+  .history-mobile-card .badge { padding: 3px 9px; }
 }
 
 @media (max-width: 768px) {

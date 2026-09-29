@@ -33,7 +33,7 @@ router.put('/:id', filterByTeacher, async (req, res, next) => {
 
 router.delete('/:id', filterByTeacher, async (req, res, next) => {
   try {
-    await studentService.verifyAccess(req.params.id, req.teacherScope)
+    await studentService.verifyDeleteAccess(req.params.id, req.teacherScope)
     await studentService.remove(req.params.id)
     res.json({ success: true })
   } catch (err) { next(err) }
@@ -49,6 +49,9 @@ router.get('/check-name', filterByTeacher, async (req, res, next) => {
 
 router.put('/:id/status', filterByTeacher, async (req, res, next) => {
   try {
+    if (!['active', 'quit'].includes(req.body.status)) {
+      return res.status(400).json({ error: '无效的学生状态' })
+    }
     await studentService.verifyAccess(req.params.id, req.teacherScope)
     const student = await studentService.updateStatus(req.params.id, req.body.status)
     res.json(student)
@@ -59,7 +62,7 @@ router.post('/:id/add-hours', filterByTeacher, async (req, res, next) => {
   try {
     await studentService.verifyAccess(req.params.id, req.teacherScope)
     const student = await studentService.addHours(
-      req.params.id, req.body.hours, req.body.remark, req.user.username
+      req.params.id, req.body.hours, req.body.remark, req.user.username, req.teacherScope
     )
     res.json(student)
   } catch (err) { next(err) }
@@ -69,7 +72,7 @@ router.post('/:id/subtract-hours', filterByTeacher, async (req, res, next) => {
   try {
     await studentService.verifyAccess(req.params.id, req.teacherScope)
     const student = await studentService.subtractHours(
-      req.params.id, req.body.hours, req.body.remark, req.user.username
+      req.params.id, req.body.hours, req.body.remark, req.user.username, req.teacherScope
     )
     res.json(student)
   } catch (err) { next(err) }
@@ -77,9 +80,12 @@ router.post('/:id/subtract-hours', filterByTeacher, async (req, res, next) => {
 
 router.post('/batch', filterByTeacher, async (req, res, next) => {
   try {
+    if (!Array.isArray(req.body?.students) || req.body.students.some(student => !student || typeof student !== 'object')) {
+      return res.status(400).json({ error: '请提供有效的学生列表' })
+    }
     const createdBy = req.user.role === 'admin' ? 'admin' : 'teacher'
     const creatorId = req.user.role === 'admin' ? null : req.user.teacherId
-    const result = await studentService.addBatch(req.body.students, req.body.defaultHours, createdBy, creatorId)
+    const result = await studentService.addBatch(req.body.students.map(student => ({ ...student, isTest: req.body.isTest || student.isTest })), req.body.defaultHours, createdBy, creatorId)
     res.json(result)
   } catch (err) { next(err) }
 })

@@ -16,11 +16,8 @@ router.get('/', filterByTeacher, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/', filterByTeacher, async (req, res, next) => {
-  try {
-    const record = await hourRecordService.create(req.body, req.teacherScope)
-    res.status(201).json(record)
-  } catch (err) { next(err) }
+router.post('/', filterByTeacher, (_req, res) => {
+  res.status(405).json({ error: '请通过学生课时操作或正式课程点名生成课时记录' })
 })
 
 export default router

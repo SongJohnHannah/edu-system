@@ -22,15 +22,12 @@ export default defineConfig(({ mode }) => ({
   server: {
     host: '0.0.0.0',
     port: 3000,
-    open: true,
+    open: false,
     allowedHosts: ['education.weiguandu.cn'],
-    hmr: {
-      host: 'education.weiguandu.cn',
-      protocol: 'wss'
-    },
+    hmr: process.env.HMR_HOST ? { host: process.env.HMR_HOST, protocol: 'wss' } : undefined,
     proxy: {
       '/edusystem/api': {
-        target: mode === 'development' ? 'http://localhost:3101' : 'http://localhost:3001',
+        target: process.env.API_PROXY_TARGET || 'http://localhost:3001',
         changeOrigin: true
       }
     }

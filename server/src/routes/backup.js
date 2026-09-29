@@ -15,12 +15,12 @@ router.get('/export', async (req, res, next) => {
 
 router.post('/import', async (req, res, next) => {
   try {
-    const result = await backupService.importData(req.body.data || req.body)
+    const result = await backupService.importData(req.body)
     res.json(result)
   } catch (err) { next(err) }
 })
 
-router.post('/import-sql', express.text({ type: 'text/plain' }), async (req, res, next) => {
+router.post('/import-sql', express.text({ type: 'text/plain', limit: '10mb' }), async (req, res, next) => {
   try {
     const result = await backupService.importSQL(req.body)
     res.json(result)

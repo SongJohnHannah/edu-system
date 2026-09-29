@@ -1,13 +1,59 @@
+import { listOccurrences, iso, addDays, weekStartOf } from './scheduleService.js'
 import pool from '../config/database.js'
 
+function validateRange(start, end) {
+  const valid = value => /^\d{4}-\d{2}-\d{2}$/.test(value) && iso(new Date(`${value}T12:00:00`)) === value
+  if (!valid(start) || !valid(end) || start > end || (new Date(end) - new Date(start)) / 86400000 > 366) {
+    throw Object.assign(new Error('统计日期范围须在一年以内'), { status: 400 })
+  }
+}
+
+async function attendanceByTeacher(start, end) {
+  validateRange(start, end)
+  const [attendance] = await pool.execute(`
+    SELECT course_id, date, original_date, student_ids, hours_deducted, recorded_by
+    FROM attendance WHERE date BETWEEN ? AND ? AND voided_at IS NULL
+  `, [start, end])
+  if (!attendance.length) return new Map()
+
+  // recorded_by identifies the operator. Admin attendance has no recorded_by;
+  // historical handovers also make the current course owner unreliable.
+  const occurrenceTeachers = new Map()
+  const legacyDateTeachers = new Map()
+  for (let day = start; day <= end; day = addDays(day, 62)) {
+    const chunkEnd = addDays(day, 61) < end ? addDays(day, 61) : end
+    for (const row of await listOccurrences(day, chunkEnd)) {
+      occurrenceTeachers.set(row.id, row.teacherId)
+      legacyDateTeachers.set(`${row.courseId}:${row.date}`, row.teacherId)
+    }
+  }
+
+  const totals = new Map()
+  for (const row of attendance) {
+    const teacherId = row.original_date
+      ? occurrenceTeachers.get(`${row.course_id}:${iso(row.original_date)}`) || row.recorded_by
+      : legacyDateTeachers.get(`${row.course_id}:${iso(row.date)}`) || row.recorded_by
+    if (!teacherId) continue
+    const current = totals.get(teacherId) || { attendanceCount: 0, consumedHours: 0 }
+    const studentIds = typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : row.student_ids
+    current.attendanceCount++
+    current.consumedHours += Number(row.hours_deducted ?? 1) * studentIds.length
+    totals.set(teacherId, current)
+  }
+  return totals
+}
+
 export async function getTeacherStats(startDate, endDate, teacherScope) {
-  let teacherQuery = "SELECT id, name, phone, subject FROM teachers WHERE status != 'deleted'"
+  validateRange(startDate, endDate)
+  const attMap = await attendanceByTeacher(startDate, endDate)
+  let teacherQuery = 'SELECT id, name, phone, subject, status FROM teachers'
   let teacherParams = []
   if (teacherScope) {
-    teacherQuery += ' AND id = ?'
+    teacherQuery += ' WHERE id = ?'
     teacherParams = [teacherScope]
   }
-  const [teachers] = await pool.execute(teacherQuery, teacherParams)
+  const [teacherRows] = await pool.execute(teacherQuery, teacherParams)
+  const teachers = teacherRows.filter(teacher => teacher.status !== 'deleted' || attMap.has(teacher.id))
 
   const teacherIds = teachers.map(t => t.id)
   if (teacherIds.length === 0) return []
@@ -23,92 +69,61 @@ export async function getTeacherStats(startDate, endDate, teacherScope) {
       FROM courses c2, JSON_TABLE(c2.student_ids, '$[*]' COLUMNS (student_id VARCHAR(36) PATH '$')) j
       WHERE c2.teacher_id IN (${teacherIds.map(() => '?').join(',')})
     ) h ON h.course_id = c.id
-    WHERE c.teacher_id IN (${teacherIds.map(() => '?').join(',')})
+    WHERE c.teacher_id IN (${teacherIds.map(() => '?').join(',')}) AND c.archived_at IS NULL
     GROUP BY c.teacher_id
   `, [...teacherIds, ...teacherIds])
 
-  // Attendance stats by actual recorder (recorded_by), not current course owner
-  const [attStats] = await pool.execute(`
-    SELECT a.recorded_by AS teacher_id,
-           COUNT(a.id) AS attendance_count,
-           COALESCE(SUM(
-             COALESCE(a.hours_deducted, 1) * JSON_LENGTH(a.student_ids)
-           ), 0) AS consumed_hours
-    FROM attendance a
-    WHERE a.recorded_by IN (${teacherIds.map(() => '?').join(',')})
-      AND a.date BETWEEN ? AND ?
-    GROUP BY a.recorded_by
-  `, [...teacherIds, startDate, endDate])
-
   const courseMap = new Map(courseStats.map(r => [r.teacher_id, r]))
-  const attMap = new Map(attStats.map(r => [r.teacher_id, r]))
 
   return teachers.map(teacher => ({
     ...teacher,
     courseCount: courseMap.get(teacher.id)?.course_count || 0,
     studentCount: courseMap.get(teacher.id)?.student_count || 0,
-    attendanceCount: attMap.get(teacher.id)?.attendance_count || 0,
-    consumedHours: Number(attMap.get(teacher.id)?.consumed_hours || 0)
+    attendanceCount: attMap.get(teacher.id)?.attendanceCount || 0,
+    consumedHours: attMap.get(teacher.id)?.consumedHours || 0
   }))
 }
 
-export async function getWeekdayDistribution(teacherScope) {
-  let query = 'SELECT weekday, COUNT(*) AS cnt FROM courses'
-  let params = []
-  if (teacherScope) {
-    query += ' WHERE teacher_id = ?'
-    params = [teacherScope]
-  }
-  query += ' GROUP BY weekday'
-  const [rows] = await pool.execute(query, params)
+export async function getWeekdayDistribution(teacherScope, start = weekStartOf(iso(new Date())), end = addDays(start, 6)) {
+  validateRange(start, end)
   const distribution = [0, 0, 0, 0, 0, 0, 0]
-  rows.forEach(r => {
-    if (r.weekday >= 1 && r.weekday <= 7) {
-      distribution[r.weekday - 1] = r.cnt
-    }
-  })
+  for (let day = start; day <= end; day = addDays(day, 62)) {
+    const chunkEnd = addDays(day, 61) < end ? addDays(day, 61) : end
+    const rows = await listOccurrences(day, chunkEnd)
+    for (const row of rows) if (!teacherScope || row.teacherId === teacherScope) distribution[row.weekday - 1]++
+  }
   return distribution
 }
 
 export async function getOverallStats(startDate, endDate, teacherScope) {
-  let teacherWhere = ''
+  validateRange(startDate, endDate)
   let courseFilter = ''
   let courseParams = []
 
   if (teacherScope) {
-    teacherWhere = ' WHERE id = ? AND status != ?'
     courseFilter = ' AND c.teacher_id = ?'
     courseParams = [teacherScope]
   }
 
   const [[{ totalTeachers }]] = await pool.execute(
-    `SELECT COUNT(*) AS totalTeachers FROM teachers${teacherScope ? ' WHERE id = ? AND status != ?' : " WHERE status != 'deleted'"}`,
-    teacherScope ? [teacherScope, 'deleted'] : []
+    `SELECT COUNT(*) AS totalTeachers FROM teachers${teacherScope ? ' WHERE id = ?' : ''}`,
+    teacherScope ? [teacherScope] : []
   )
 
   // Course count (by current ownership)
   const [[{ totalCourses }]] = await pool.execute(
-    `SELECT COUNT(DISTINCT id) AS totalCourses FROM courses WHERE 1=1 ${courseFilter ? ' AND teacher_id = ?' : ''}`,
+    `SELECT COUNT(DISTINCT id) AS totalCourses FROM courses WHERE archived_at IS NULL ${courseFilter ? ' AND teacher_id = ?' : ''}`,
     courseParams
   )
 
-  // Attendance stats (by recorded_by, the actual teacher who took attendance)
-  const attFilter = teacherScope ? ' AND a.recorded_by = ?' : ''
-  const [stats] = await pool.execute(`
-    SELECT COUNT(a.id) AS totalAttendance,
-           COALESCE(SUM(
-             COALESCE(a.hours_deducted, 1) * JSON_LENGTH(a.student_ids)
-           ), 0) AS totalConsumedHours,
-           COUNT(DISTINCT a.recorded_by) AS activeTeachers
-    FROM attendance a
-    WHERE a.date BETWEEN ? AND ? ${attFilter}
-  `, teacherScope ? [startDate, endDate, teacherScope] : [startDate, endDate])
+  const attendance = await attendanceByTeacher(startDate, endDate)
+  const totals = teacherScope ? [attendance.get(teacherScope)].filter(Boolean) : [...attendance.values()]
 
   return {
     totalTeachers,
-    activeTeachers: stats[0].activeTeachers || 0,
+    activeTeachers: totals.length,
     totalCourses: totalCourses || 0,
-    totalAttendance: stats[0].totalAttendance || 0,
-    totalConsumedHours: Number(stats[0].totalConsumedHours || 0)
+    totalAttendance: totals.reduce((sum, item) => sum + item.attendanceCount, 0),
+    totalConsumedHours: totals.reduce((sum, item) => sum + item.consumedHours, 0)
   }
 }

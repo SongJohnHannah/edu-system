@@ -1,4 +1,5 @@
 const API_BASE = '/edusystem/api'
+export const apiUrl = path => `${API_BASE}${path}`
 
 function getAccessToken() {
   return localStorage.getItem('access_token')
@@ -16,17 +17,26 @@ function setTokens(access, refresh) {
 function clearTokens() {
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
+  localStorage.removeItem('user')
 }
 
-async function refreshAccessToken() {
+let refreshPending = null
+function refreshAccessToken() {
+  if (!refreshPending) refreshPending = refreshOnce().finally(() => { refreshPending = null })
+  return refreshPending
+}
+async function refreshOnce() {
   const refreshToken = getRefreshToken()
   if (!refreshToken) return false
 
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30000)
   try {
-    const response = await fetch(`${API_BASE}/auth/refresh`, {
+    const response = await fetch(apiUrl('/auth/refresh'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken })
+      body: JSON.stringify({ refreshToken }),
+      signal: controller.signal
     })
     if (!response.ok) return false
     const data = await response.json()
@@ -34,6 +44,8 @@ async function refreshAccessToken() {
     return true
   } catch {
     return false
+  } finally {
+    clearTimeout(timeout)
   }
 }
 
@@ -51,13 +63,19 @@ async function request(method, path, data = null) {
       options.body = JSON.stringify(data)
     }
 
-    let response = await fetch(`${API_BASE}${path}`, options)
+    const send = async () => {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30000)
+      try { return await fetch(apiUrl(path), { ...options, signal: controller.signal }) }
+      finally { clearTimeout(timeout) }
+    }
+    let response = await send()
 
-    if (response.status === 401 && getRefreshToken()) {
+    if (response.status === 401 && !['/auth/login', '/auth/refresh'].includes(path) && getRefreshToken()) {
       const refreshed = await refreshAccessToken()
       if (refreshed) {
         headers['Authorization'] = `Bearer ${getAccessToken()}`
-        response = await fetch(`${API_BASE}${path}`, options)
+        response = await send()
       } else {
         clearTokens()
         window.location.href = '/login'
@@ -65,9 +83,14 @@ async function request(method, path, data = null) {
       }
     }
 
+    if (response.status === 401) {
+      clearTokens()
+      if (window.location.pathname !== '/login') window.location.href = '/login'
+    }
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: '请求失败' }))
-      throw new Error(error.error || error.message || '请求失败')
+      const message = error.details?.length ? `${error.error}：\n${error.details.map(d => `${d.date} ${d.time} · ${d.student} · ${d.teacher}`).join('\n')}` : error.error || error.message || '请求失败'
+      throw Object.assign(new Error(message), { status: response.status, details: error.details })
     }
 
     return response.json()
