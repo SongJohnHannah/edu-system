@@ -1,5 +1,6 @@
 import { chromium } from '@playwright/test'
 
+const desktopRouteOrder = ['/', '/students', '/weekly-schedule', '/trial-bookings', '/attendance', '/courses', '/calendar', '/teachers', '/teacher-stats', '/handovers']
 const browser = await chromium.launch({ headless: true })
 try {
   for (const [width, height] of [[1440, 900], [1024, 768], [956, 440], [844, 390], [390, 844], [320, 700]]) for (const role of ['admin', 'teacher']) {
@@ -40,8 +41,18 @@ try {
       await page.getByRole('heading', { name: '个人账户' }).waitFor({ state: 'visible' })
       if (width < 600) {
         await page.locator('.mobile-tab-bar').getByRole('button', { name: '更多' }).click()
-        await page.locator('.mobile-more-menu').getByText('周排课').waitFor({ state: 'visible' })
+        await page.locator('.mobile-more-menu').getByText('课程安排').waitFor({ state: 'visible' })
         if (await page.locator('.mobile-more-menu .more-item').count() < 6) throw new Error('手机更多菜单缺少入口')
+        const mobileLinks = await page.locator('.mobile-tab-bar a, .mobile-more-menu a').evaluateAll(nodes => nodes.map(node => ({
+          route: node.getAttribute('href'), icon: !!node.querySelector('svg')
+        })))
+        const expectedOrder = role === 'admin' ? desktopRouteOrder : desktopRouteOrder.filter(route => route !== '/handovers')
+        const actualOrder = mobileLinks.map(item => item.route).filter(route => route !== '/profile')
+        if (JSON.stringify(actualOrder) !== JSON.stringify(expectedOrder)) throw new Error(`${width}px ${role} 手机导航顺序与 PC/iPad 不一致：${actualOrder.join(', ')}`)
+        const missingIcons = mobileLinks.filter(item => !item.icon).map(item => item.route)
+        if (missingIcons.length) throw new Error(`${width}px ${role} 手机导航缺少图标：${missingIcons.join(', ')}`)
+        const missingActionIcons = await page.locator('.mobile-more-menu button:not(:has(svg))').allTextContents()
+        if (missingActionIcons.length) throw new Error(`${width}px ${role} 手机更多操作缺少图标：${missingActionIcons.join(', ')}`)
       } else {
         if (width <= 1240) await page.getByRole('button', { name: '打开导航' }).click()
         const nav = page.locator('.desktop-nav .nav')
@@ -95,6 +106,14 @@ try {
         await page.getByRole('button', { name: '确认恢复' }).click()
         await page.getByText('仅支持系统备份中的数据语句').first().waitFor({ state: 'visible' })
         if (importCalls !== 1) throw new Error(`${width}px 恢复请求次数错误`)
+      }
+      if (width === 390 && role === 'admin') {
+        await page.goto('http://127.0.0.1:4174/trial-bookings')
+        await page.locator('.mobile-tab-bar a[href="/trial-bookings"].tab-active').waitFor({ state: 'visible' })
+        if (await page.locator('.mobile-tab-bar button.tab-active').count()) throw new Error('试听预约错误地高亮了更多')
+        await page.goto('http://127.0.0.1:4174/courses')
+        await page.locator('.mobile-tab-bar button.tab-active').waitFor({ state: 'visible' })
+        if (await page.locator('.mobile-tab-bar a[href="/trial-bookings"].tab-active').count()) throw new Error('课程页错误地高亮了试听预约')
       }
       if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 2)) throw new Error(`${width}px ${role} 整页横向溢出`)
       if (errors.length) throw new Error(`${width}px ${role} 脚本错误：${errors.join('; ')}`)

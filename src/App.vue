@@ -13,22 +13,14 @@
         </div>
         <button class="tablet-menu-btn" type="button" :aria-expanded="showTabletNav" @click="showTabletNav = !showTabletNav">{{ showTabletNav ? '收起导航' : '打开导航' }}</button>
         <nav class="nav" :class="{ 'tablet-open': showTabletNav }">
-          <router-link to="/" class="nav-item" exact-active-class="active">首页</router-link>
-          <router-link to="/students" class="nav-item" active-class="active">学生</router-link>
-          <router-link to="/weekly-schedule" class="nav-item" active-class="active">周排课</router-link>
-          <router-link to="/trial-bookings" class="nav-item" active-class="active">试听预约</router-link>
-          <router-link to="/attendance" class="nav-item" active-class="active">点名</router-link>
+          <AppNavLink v-for="item in primaryNavItems" :key="item.to" :item="item" link-class="nav-item" active-class="active" />
           <div class="nav-more">
             <button class="nav-item nav-more-btn" :class="{ active: showNavMore || moreNavActive }" :aria-expanded="showNavMore" @click.stop="showNavMore = !showNavMore; showAccountMenu = false">
               更多
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
             <div class="nav-more-dropdown" v-if="showNavMore" @click.stop>
-              <router-link to="/courses" class="nav-more-item" @click="showNavMore = false">课程安排</router-link>
-              <router-link to="/calendar" class="nav-more-item" @click="showNavMore = false">日历</router-link>
-              <router-link to="/teachers" class="nav-more-item" @click="showNavMore = false">教师信息</router-link>
-              <router-link to="/teacher-stats" class="nav-more-item" @click="showNavMore = false">教师统计</router-link>
-              <router-link to="/handovers" class="nav-more-item" @click="showNavMore = false" v-if="isAdmin">交接记录</router-link>
+              <AppNavLink v-for="item in moreNavItems" :key="item.to" :item="item" link-class="nav-more-item" @select="showNavMore = false" />
             </div>
           </div>
         </nav>
@@ -41,7 +33,7 @@
             </button>
             <div v-if="showAccountMenu" id="account-actions" class="account-dropdown" @click.stop>
               <div class="account-summary"><strong :title="authUser.displayName">{{ authUser.displayName }}</strong><span v-if="showRoleLabel">{{ roleLabel }}</span></div>
-              <router-link to="/profile" class="account-action" @click="showAccountMenu = false">个人资料</router-link>
+              <AppNavLink :item="accountNavItem" link-class="account-action" @select="showAccountMenu = false" />
               <button v-if="isAdmin" type="button" class="account-action" @click="showAccountMenu = false; showBackupModal = true">数据备份与恢复</button>
               <button type="button" class="account-action account-logout" @click="showAccountMenu = false; handleLogout()">退出登录</button>
               <div class="account-version">v{{ appVersion }}</div>
@@ -68,45 +60,7 @@
 
     <!-- 移动端底部 Tab 栏 -->
     <nav v-if="!isLoginPage" class="mobile-tab-bar">
-      <router-link to="/" class="tab-item" exact-active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-          <polyline points="9 22 9 12 15 12 15 22"/>
-        </svg>
-        <span>首页</span>
-      </router-link>
-      <router-link to="/students" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-        </svg>
-        <span>学生</span>
-      </router-link>
-      <router-link to="/attendance" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 11l3 3L22 4"/>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-        </svg>
-        <span>点名</span>
-      </router-link>
-      <router-link to="/courses" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-        <span>课程</span>
-      </router-link>
-      <router-link to="/calendar" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-          <line x1="16" y1="2" x2="16" y2="6"/>
-          <line x1="8" y1="2" x2="8" y2="6"/>
-          <line x1="3" y1="10" x2="21" y2="10"/>
-        </svg>
-        <span>日历</span>
-      </router-link>
+      <AppNavLink v-for="item in primaryNavItems" :key="item.to" :item="item" link-class="tab-item" active-class="tab-active" show-icon :icon-size="22" />
       <button type="button" class="tab-item" :class="{ 'tab-active': showMoreMenu || moreMobileActive }" :aria-expanded="showMoreMenu" aria-controls="mobile-more-actions" @click="showMoreMenu = !showMoreMenu">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
@@ -118,49 +72,10 @@
     <!-- 移动端更多菜单 -->
     <div class="mobile-more-overlay" v-if="showMoreMenu" @click="showMoreMenu = false">
       <div id="mobile-more-actions" class="mobile-more-menu" @click.stop>
-        <router-link to="/weekly-schedule" class="more-item" @click="showMoreMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-          </svg>
-          <span>周排课</span>
-        </router-link>
-        <router-link to="/trial-bookings" class="more-item" @click="showMoreMenu = false"><span>试听预约</span></router-link>
-        <router-link to="/teachers" class="more-item" @click="showMoreMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          <span>教师信息</span>
-        </router-link>
-        <router-link to="/teacher-stats" class="more-item" @click="showMoreMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="20" x2="18" y2="10"/>
-            <line x1="12" y1="20" x2="12" y2="4"/>
-            <line x1="6" y1="20" x2="6" y2="14"/>
-          </svg>
-          <span>教师统计</span>
-        </router-link>
-        <router-link to="/profile" class="more-item" @click="showMoreMenu = false" v-if="authUser">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          <span>个人资料</span>
-        </router-link>
-        <router-link to="/handovers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="8.5" cy="7" r="4"/>
-            <line x1="20" y1="8" x2="20" y2="14"/>
-            <line x1="23" y1="11" x2="17" y2="11"/>
-          </svg>
-          <span>交接记录</span>
-        </router-link>
-        <button v-if="isAdmin" type="button" class="more-item" @click="showMoreMenu = false; showBackupModal = true">数据备份与恢复</button>
-        <button v-if="authUser" type="button" class="more-item more-logout" @click="showMoreMenu = false; handleLogout()">退出登录</button>
+        <AppNavLink v-for="item in moreNavItems" :key="item.to" :item="item" link-class="more-item" show-icon @select="showMoreMenu = false" />
+        <AppNavLink v-if="authUser" :item="accountNavItem" link-class="more-item" show-icon @select="showMoreMenu = false" />
+        <button v-if="isAdmin" type="button" class="more-item" @click="showMoreMenu = false; showBackupModal = true"><NavIcon name="backup" :size="18" /><span>数据备份与恢复</span></button>
+        <button v-if="authUser" type="button" class="more-item more-logout" @click="showMoreMenu = false; handleLogout()"><NavIcon name="logout" :size="18" /><span>退出登录</span></button>
       </div>
     </div>
 
@@ -216,7 +131,10 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Toast from './components/Toast.vue'
 import BrandLogo from './components/BrandLogo.vue'
+import AppNavLink from './components/AppNavLink.vue'
+import NavIcon from './components/NavIcon.vue'
 import { NConfigProvider, zhCN, dateZhCN } from 'naive-ui'
+import { navigationItems } from './navigation.js'
 import { downloadBackup, importData } from './utils/storage'
 import { useToast } from './composables/useToast'
 
@@ -306,8 +224,13 @@ const currentPageTitle = computed(() => {
 })
 
 const isLoginPage = computed(() => router.currentRoute.value.path === '/login')
-const moreNavActive = computed(() => ['/courses', '/calendar', '/teachers', '/teacher-stats', '/handovers'].includes(router.currentRoute.value.path))
-const moreMobileActive = computed(() => ['/weekly-schedule', '/trial-bookings', '/teachers', '/teacher-stats', '/profile', '/handovers', '/hours-history'].includes(router.currentRoute.value.path))
+const isAdmin = computed(() => authUser.value?.role === 'admin')
+const visibleNavItems = computed(() => navigationItems.filter(item => !item.adminOnly || isAdmin.value))
+const primaryNavItems = computed(() => visibleNavItems.value.filter(item => item.section === 'primary'))
+const moreNavItems = computed(() => visibleNavItems.value.filter(item => item.section === 'more'))
+const accountNavItem = navigationItems.find(item => item.section === 'account')
+const moreNavActive = computed(() => moreNavItems.value.some(item => item.to === router.currentRoute.value.path))
+const moreMobileActive = computed(() => moreNavActive.value || [accountNavItem.to, '/hours-history'].includes(router.currentRoute.value.path))
 
 onMounted(async () => {
   const { useAuthStore } = await import('./stores/auth.js')
@@ -333,8 +256,6 @@ onMounted(() => document.addEventListener('click', closeDropdowns))
 onUnmounted(() => document.removeEventListener('click', closeDropdowns))
 onMounted(() => document.addEventListener('keydown', closeMenusOnEscape))
 onUnmounted(() => document.removeEventListener('keydown', closeMenusOnEscape))
-
-const isAdmin = computed(() => authUser.value?.role === 'admin')
 
 const roleLabel = computed(() => {
   if (!authUser.value) return ''
