@@ -43,15 +43,6 @@
       </div>
     </header>
 
-    <!-- 移动端顶部栏 -->
-    <header v-if="!isLoginPage" class="mobile-header">
-      <div class="mobile-header-content">
-        <div class="mobile-logo">
-          <BrandLogo />
-          <span class="mobile-title">{{ currentPageTitle }}</span>
-        </div>
-      </div>
-    </header>
     <main class="main" :class="{ 'main-login': isLoginPage }">
       <router-view v-slot="{ Component }">
         <component :is="Component" />
@@ -202,26 +193,6 @@ watch(() => router.currentRoute.value.path, () => {
 const appVersion = __APP_VERSION__
 
 const authUser = ref(null)
-
-const currentPageTitle = computed(() => {
-  const route = router.currentRoute.value
-  const titles = {
-    '/': '首页',
-    '/students': '学生管理',
-    '/teachers': '教师信息',
-    '/courses': '课程安排',
-    '/attendance': '点名',
-    '/calendar': '日历',
-    '/weekly-schedule': '周排课',
-    '/trial-bookings': '试听预约',
-    '/teacher-stats': '教师统计',
-    '/profile': '个人资料',
-    '/hours-history': '课时历史',
-    '/handovers': '交接记录',
-    '/login': '登录'
-  }
-  return titles[route.path] || '教务系统'
-})
 
 const isLoginPage = computed(() => router.currentRoute.value.path === '/login')
 const isAdmin = computed(() => authUser.value?.role === 'admin')
@@ -490,37 +461,6 @@ async function confirmImport() {
 .account-logout { border-top: 1px solid var(--color-border); }
 .account-version { padding: 4px 15px 10px; color: var(--color-text-secondary); font-size: 11px; }
 
-/* ===== 移动端顶部栏（默认隐藏）===== */
-.mobile-header {
-  display: none;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.mobile-header-content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  height: 48px;
-}
-
-.mobile-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.mobile-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
 /* ===== 移动端底部 Tab 栏（默认隐藏）===== */
 .mobile-tab-bar {
   display: none;
@@ -709,10 +649,6 @@ button.more-item { width: 100%; border: 0; background: white; text-align: left; 
     display: none;
   }
 
-  .mobile-header {
-    display: block;
-  }
-
   .mobile-tab-bar {
     display: flex;
   }
@@ -751,6 +687,7 @@ button.more-item { width: 100%; border: 0; background: white; text-align: left; 
 
   .main {
     padding: 16px 12px;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
     padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
   }
 

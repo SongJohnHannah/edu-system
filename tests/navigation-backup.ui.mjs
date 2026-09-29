@@ -40,6 +40,9 @@ try {
       await page.goto('http://127.0.0.1:4174/profile', { waitUntil: 'domcontentloaded' })
       await page.getByRole('heading', { name: '个人账户' }).waitFor({ state: 'visible' })
       if (width < 600) {
+        if (await page.locator('.mobile-header').count()) throw new Error(`${width}px 手机顶部栏仍存在`)
+        const mainTop = (await page.locator('main.main').boundingBox())?.y
+        if (mainTop == null || mainTop > 1) throw new Error(`${width}px 手机页面仍被顶部栏占去一行：main y=${mainTop}`)
         await page.locator('.mobile-tab-bar').getByRole('button', { name: '更多' }).click()
         await page.locator('.mobile-more-menu').getByText('课程安排').waitFor({ state: 'visible' })
         if (await page.locator('.mobile-more-menu .more-item').count() < 6) throw new Error('手机更多菜单缺少入口')
