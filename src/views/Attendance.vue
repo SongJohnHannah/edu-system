@@ -10,7 +10,7 @@
     <div class="select-course" v-if="!dataLoading && !dataError">
       <label>选择日期与课程</label>
       <div class="course-picker">
-        <input v-model="selectedDate" type="date" class="input" aria-label="点名日期" @change="loadOccurrencesForDate" />
+        <OfficeDatePicker v-model="selectedDate" class="input" aria-label="点名日期" @change="loadOccurrencesForDate" />
         <SearchSelect v-if="!dayLoading && filteredCourses.length" v-model="selectedCourseId"
           :options="filteredCourses.map(c => ({ value: c.id, label: `${c.startTime}—${c.endTime} · ${c.name}`, meta: getTeacherName(c.teacherId) }))"
           placeholder="搜索或选择课程" @update:modelValue="loadCourseStudents" />
@@ -654,7 +654,7 @@ async function confirmDeleteStudents() {
   gap: 16px;
 }
 
-.select-course label {
+.select-course > label {
   font-size: 18px;
   font-weight: 600;
   color: var(--color-text);
@@ -668,6 +668,7 @@ async function confirmDeleteStudents() {
   max-width: 480px;
   width: 100%;
 }
+.course-picker > * { flex: 1; min-width: 0; }
 
 .attendance-form {
   background: white;
@@ -1148,7 +1149,7 @@ async function confirmDeleteStudents() {
     align-items: stretch;
     gap: 12px;
   }
-  .select-course label {
+  .select-course > label {
     font-size: 18px;
     font-weight: 600;
     text-align: center;

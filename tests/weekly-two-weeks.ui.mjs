@@ -134,7 +134,7 @@ try {
     const markings = await cards.evaluateAll(elements => elements.map(element => ({
       name: element.querySelector('strong')?.textContent,
       overlap: element.classList.contains('has-overlap'),
-      outline: getComputedStyle(element).outlineStyle,
+      outline: element.closest('.overlap-region') ? getComputedStyle(element.closest('.overlap-region')).borderStyle : getComputedStyle(element).outlineStyle,
       teacher: element.style.getPropertyValue('--c-bg')
     })))
     const byName = Object.fromEntries(markings.map(marking => [marking.name, marking]))

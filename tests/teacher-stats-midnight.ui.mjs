@@ -34,9 +34,11 @@ try {
     assert(requests.slice(-3).every(request => request.start === '2026-10-01' && request.end === '2026-10-01'), `${device}: today APIs kept yesterday`)
 
     await page.getByRole('button', { name: '自定义' }).click()
-    const dates = page.locator('.custom-range input[type="date"]')
+    const dates = page.locator('.custom-range .office-date-picker input')
     await dates.nth(0).fill('2026-09-01')
+    await dates.nth(0).press('Enter')
     await dates.nth(1).fill('2026-09-03')
+    await dates.nth(1).press('Enter')
     await page.getByRole('button', { name: '应用' }).click()
     await page.getByText('2026-09-01 至 2026-09-03').waitFor({ state: 'visible' })
     const beforeMidnight = requests.length

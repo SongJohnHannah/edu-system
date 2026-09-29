@@ -60,15 +60,17 @@ try {
       const errors = []
       page.on('pageerror', error => errors.push(error.message))
       await page.goto('http://127.0.0.1:4174/attendance', { waitUntil: 'domcontentloaded' })
-      const picker = page.locator('input[aria-label="点名日期"]')
+      const picker = page.getByLabel('点名日期')
       await picker.waitFor({ state: 'visible' })
       for (const { oldDate, newDate, oldName, newName } of cases) {
         const oldRequest = page.waitForRequest(request => request.url().includes(`/courses/occurrences?start=${oldDate}`))
         await picker.fill(oldDate)
+        await picker.press('Enter')
         await oldRequest
         await page.getByText('正在加载所选日期的课程…').waitFor({ state: 'visible' })
         if (await page.locator('.select-course .search-select').count()) throw new Error(`${width}px: 加载中仍可选择旧日期课程`)
         await picker.fill(newDate)
+        await picker.press('Enter')
         await page.locator('.select-course .search-select').waitFor({ state: 'visible' })
         await page.locator('.select-course .search-select').click()
         await page.locator('.n-base-select-option').filter({ hasText: newName }).click()
@@ -87,6 +89,7 @@ try {
       await page.locator('.attendance-form').getByRole('button', { name: /确认点名/ }).click()
       await validationRequest
       await picker.fill('2026-10-02')
+      await picker.press('Enter')
       await page.locator('.select-course .search-select').waitFor({ state: 'visible' })
       await page.locator('.select-course .search-select').click()
       await page.locator('.n-base-select-option').filter({ hasText: '新日期课程甲' }).click()

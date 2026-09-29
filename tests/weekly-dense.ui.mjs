@@ -117,6 +117,7 @@ try {
     if (size.name === 'ipad-portrait') {
       await page.keyboard.press('Escape')
       await cards.filter({ hasText: '演讲训练' }).first().click()
+      await page.locator('.overlap-modal').getByRole('button', { name: /演讲训练/ }).click()
       await page.locator('.detail-modal').getByText('演讲训练').first().waitFor({ state: 'visible' })
     }
     if (errors.length) throw new Error(`${size.name}: ${errors.join('; ')}`)

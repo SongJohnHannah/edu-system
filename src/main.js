@@ -1,4 +1,5 @@
 import OfficeModal from './components/OfficeModal.vue'
+import OfficeDatePicker from './components/OfficeDatePicker.vue'
 import OfficeButton from './components/OfficeButton.vue'
 import OfficeInput from './components/OfficeInput.vue'
 import { NTable } from 'naive-ui'
@@ -13,6 +14,7 @@ async function bootstrap() {
   const app = createApp(App)
   const pinia = createPinia()
   app.component('OfficeModal', OfficeModal)
+  app.component('OfficeDatePicker', OfficeDatePicker)
   app.component('OfficeButton', OfficeButton)
   app.component('OfficeInput', OfficeInput)
   app.component('OfficeTable', NTable)

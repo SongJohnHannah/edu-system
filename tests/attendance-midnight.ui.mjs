@@ -43,13 +43,13 @@ try {
     page.on('pageerror', error => errors.push(error.message))
     await page.clock.install({ time: new Date('2026-09-30T23:59:50+08:00') })
     await page.goto('http://127.0.0.1:4174/attendance', { waitUntil: 'domcontentloaded' })
-    const picker = page.locator('input[aria-label="点名日期"]')
+    const picker = page.getByLabel('点名日期')
     await picker.waitFor({ state: 'visible' })
     if (await picker.inputValue() !== '2026-09-30') throw new Error(`${size.name} 初始点名日期不正确`)
     const nextRead = page.waitForRequest(request => request.url().includes('/courses/occurrences?start=2026-10-01'), { timeout: 3000 })
     await page.clock.fastForward(11_000)
     await nextRead
-    await page.waitForFunction(() => document.querySelector('input[aria-label="点名日期"]')?.value === '2026-10-01')
+    await page.waitForFunction(() => document.querySelector('.office-date-picker input')?.value === '2026-10-01')
     if (!reads.includes('2026-10-01')) throw new Error(`${size.name} 新日期课程未读取`)
     if (!(await page.locator('.month-label').textContent()).includes('2026年10月')) throw new Error(`${size.name} 点名历史仍停在旧月份`)
 
@@ -57,9 +57,10 @@ try {
     browsingPage.on('pageerror', error => errors.push(error.message))
     await browsingPage.clock.install({ time: new Date('2026-09-30T23:59:50+08:00') })
     await browsingPage.goto('http://127.0.0.1:4174/attendance', { waitUntil: 'domcontentloaded' })
-    const browsingPicker = browsingPage.locator('input[aria-label="点名日期"]')
+    const browsingPicker = browsingPage.getByLabel('点名日期')
     await browsingPicker.waitFor({ state: 'visible' })
     await browsingPicker.fill('2026-09-28')
+    await browsingPicker.press('Enter')
     await browsingPage.clock.fastForward(11_000)
     if (await browsingPicker.inputValue() !== '2026-09-28') throw new Error(`${size.name} 午夜覆盖了主动选择的点名日期`)
 
@@ -67,7 +68,7 @@ try {
     submittingPage.on('pageerror', error => errors.push(error.message))
     await submittingPage.clock.install({ time: new Date('2026-09-30T23:59:50+08:00') })
     await submittingPage.goto('http://127.0.0.1:4174/attendance', { waitUntil: 'domcontentloaded' })
-    const submittingPicker = submittingPage.locator('input[aria-label="点名日期"]')
+    const submittingPicker = submittingPage.getByLabel('点名日期')
     await submittingPicker.waitFor({ state: 'visible' })
     await submittingPage.locator('.select-course .search-select').click()
     await submittingPage.locator('.n-base-select-option').filter({ hasText: '阅读课' }).click()
@@ -82,7 +83,7 @@ try {
     const postResponse = submittingPage.waitForResponse(response => response.url().endsWith('/attendance') && response.request().method() === 'POST')
     releasePost()
     await postResponse
-    await submittingPage.waitForFunction(() => document.querySelector('input[aria-label="点名日期"]')?.value === '2026-10-01')
+    await submittingPage.waitForFunction(() => document.querySelector('.office-date-picker input')?.value === '2026-10-01')
     if (errors.length) throw new Error(`${size.name} 页面脚本错误：${errors.join('; ')}`)
     await context.close()
   }

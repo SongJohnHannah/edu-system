@@ -14,7 +14,7 @@
       <span>显示：</span>
       <NButton size="small" :type="teacherFilter === 'all' ? 'primary' : 'default'" :secondary="teacherFilter !== 'all'" @click="teacherFilter = 'all'">全部教师</NButton>
       <NButton v-if="auth.teacherId" size="small" :type="teacherFilter === 'mine' ? 'primary' : 'default'" :secondary="teacherFilter !== 'mine'" @click="teacherFilter = 'mine'">我的课程</NButton>
-      <span class="hint desktop-hint">点击课程查看详情；鼠标拖动右上角手柄，触屏长按课程后拖动可调课。</span>
+      <span class="hint desktop-hint">点击课程查看详情；拖动手柄或触屏长按可调课。红色虚线内的重叠课程请点击选择，不可拖动。</span>
       <span class="hint phone-hint">点击课程查看详情；调整时间请在详情中操作。</span>
     </div>
     <p v-if="!referenceLoading && !referenceError && !canCreateCourse" class="create-prerequisite">{{ createPrerequisite }}</p>
@@ -67,23 +67,45 @@
             <div class="swimlane swimlane-evening"><span>晚上<br />18:00 – 22:30</span></div>
             <div v-for="(d, dayIndex) in weekDays" :key="d.date" class="day-lane" :class="{ 'next-week': dayIndex === 7 }" :data-date="d.date" :style="{ gridColumn: dayIndex + 2 }">
               <TransitionGroup name="bar">
-                <div v-for="(item, itemIndex) in itemsByDate[d.date] || []" :key="item.id" class="schedule-item course-bar"
-                  :class="{ trial: item.type === 'trial', readonly: !canEdit(item), draggable: canEdit(item) && !isPast(item), compact: minutes(item.endTime) - minutes(item.startTime) <= 30, parallel: item.laneCount > 1, dragging: drag.item?.id === item.id && drag.active, 'out-of-bounds': item.outOfBounds, 'has-overlap': item.hasOverlap }"
+                <div v-for="(item, itemIndex) in (itemsByDate[d.date] || []).filter(item => !item.hasOverlap)" :key="item.id" class="schedule-item course-bar"
+                  :class="{ trial: item.type === 'trial', readonly: !canEdit(item), draggable: canDrag(item), compact: minutes(item.endTime) - minutes(item.startTime) <= 30, dragging: drag.item?.id === item.id && drag.active, 'out-of-bounds': item.outOfBounds }"
                   :title="`${item.name} · ${item.startTime}—${item.endTime} · ${item.teacherName}`"
                   :aria-label="`${item.date} ${item.startTime} 至 ${item.endTime}，${item.name}，${item.teacherName}，查看详情`" role="button" tabindex="0"
                   :style="{ ...itemStyle(item), ...paletteStyle(item.teacherId), '--idx': itemIndex }" @pointerdown="startPointer($event, item)" @click="openItem(item)" @keydown.enter.prevent="openItem(item)" @keydown.space.prevent="openItem(item)" @dragstart.prevent>
                   <div class="bar-top"><strong class="bar-name">{{ item.name }}</strong><span v-if="item.type === 'course' && item.trialCount" class="trial-count" :data-short="`试${item.trialCount}`">试听 {{ item.trialCount }} 人</span><span v-if="item.type === 'trial'" class="trial-count" data-short="试听">试听</span></div>
                   <span class="bar-meta">{{ item.laneCount > 1 ? item.startTime : `${item.startTime}—${item.endTime}` }} <span v-if="item.outOfBounds || item.hasOverlap" title="查看详情处理警示">⚠</span></span>
                   <div class="bar-bottom"><span class="bar-teacher">{{ item.teacherName }}</span><span class="bar-students">{{ item.type === 'course' ? `${item.studentIds.length} 人` : item.studentName }}</span></div>
-                  <span v-if="canEdit(item) && !isPast(item)" class="drag-handle" title="按住拖动调整课程时间" aria-hidden="true"><svg viewBox="0 0 12 16" width="12" height="16" fill="currentColor"><circle cx="3" cy="3" r="1.25"/><circle cx="9" cy="3" r="1.25"/><circle cx="3" cy="8" r="1.25"/><circle cx="9" cy="8" r="1.25"/><circle cx="3" cy="13" r="1.25"/><circle cx="9" cy="13" r="1.25"/></svg></span>
+                  <span v-if="canDrag(item)" class="drag-handle" title="按住拖动调整课程时间" aria-hidden="true"><svg viewBox="0 0 12 16" width="12" height="16" fill="currentColor"><circle cx="3" cy="3" r="1.25"/><circle cx="9" cy="3" r="1.25"/><circle cx="3" cy="8" r="1.25"/><circle cx="9" cy="8" r="1.25"/><circle cx="3" cy="13" r="1.25"/><circle cx="9" cy="13" r="1.25"/></svg></span>
                 </div>
               </TransitionGroup>
+              <button v-for="group in overlapGroups[d.date] || []" :key="group.id" type="button" class="overlap-region"
+                :style="itemStyle(group)" :aria-label="`${group.items.length} 节重叠课程，点击选择编辑`" @click="openItem(group.items[0])">
+                <span class="overlap-count">{{ group.items.length }} 节重叠 · 选择</span>
+                <span v-for="item in group.items" :key="item.id" class="course-bar has-overlap" :class="{ trial: item.type === 'trial' }" :style="paletteStyle(item.teacherId)">
+                  <strong class="bar-name">{{ item.name }}</strong><span class="overlap-time">{{ item.startTime }}—{{ item.endTime }}</span>
+                  <span v-if="item.trialCount" class="trial-count">试听 {{ item.trialCount }} 人</span>
+                </span>
+              </button>
+              <template v-if="drag.active && drag.target?.date === d.date">
+                <div v-for="preview in dropPreviews" :key="preview.id" class="drop-preview" :style="itemStyle(preview)">
+                  <strong>{{ preview.name }}</strong><span>{{ preview.startTime }}—{{ preview.endTime }}</span>
+                </div>
+              </template>
             </div>
           </div>
         </div>
       </div>
       <div v-if="!visibleItems.length" class="empty week-empty"><p>这两周暂无课程或试听安排</p><NButton type="primary" :disabled="!canCreateCourse" @click="openCreate">创建第一门课程</NButton></div>
     </template>
+
+    <NModal v-model:show="showOverlap" preset="card" class="overlap-modal" title="选择要编辑的课程">
+      <p class="overlap-note">这些课程的时间重叠，不能拖动。请选择一节课程查看或编辑。</p>
+      <div class="overlap-options">
+        <button v-for="item in overlapChoices" :key="item.id" type="button" :style="paletteStyle(item.teacherId)" @click="selectOverlapItem(item)">
+          <strong>{{ item.name }}</strong><span>{{ item.date }} · {{ item.startTime }}—{{ item.endTime }}</span><span>{{ item.teacherName }} · {{ item.type === 'trial' ? '独立试听' : '正式课程' }}</span>
+        </button>
+      </div>
+    </NModal>
 
     <NModal v-model:show="showDetail" preset="card" class="detail-modal" title="课次详情">
       <template v-if="selectedItem">
@@ -145,7 +167,7 @@
       <div v-if="move.item" class="move-body">
         <p class="move-course">{{ move.item.name }} · {{ move.item.teacherName }}</p>
         <p>原定：{{ move.item.date }} {{ move.item.startTime }}—{{ move.item.endTime }}</p>
-        <label>新日期 <input v-model="move.targetDate" type="date" :min="moveMinDate" :max="moveMaxDate" @change="keepWithinWeek" /></label>
+        <label>新日期 <OfficeDatePicker v-model="move.targetDate" :min="moveMinDate" :max="moveMaxDate" @change="keepWithinWeek" /></label>
         <div class="move-times">
           <label>开始时间 <NSelect v-model:value="move.startTime" :options="timeOptions" @update:value="keepDuration" /></label>
           <label>结束时间 <strong class="end-time-preview">{{ move.endTime }}</strong></label>
@@ -165,7 +187,7 @@
       <div class="move-body">
         <p>把 {{ dayMove.sourceDate }} 的 {{ dayMoveCourses.length }} 节正式课程整体移到新日期，保留每节课的原开始时间和时长。</p>
         <div class="day-move-list"><div v-for="item in dayMoveCourses" :key="item.id">{{ item.startTime }}—{{ item.endTime }} · {{ item.name }} · {{ item.teacherName }}</div></div>
-        <label>新日期 <input v-model="dayMove.targetDate" type="date" :min="moveMinDate" :max="moveMaxDate" /></label>
+        <label>新日期 <OfficeDatePicker v-model="dayMove.targetDate" :min="moveMinDate" :max="moveMaxDate" /></label>
         <label>请选择整批调整范围（必选）</label>
         <NRadioGroup v-model:value="dayMove.scope"><NSpace vertical><NRadio value="once">仅这一次，后续仍按原星期上课</NRadio><NRadio value="future">从这次起，每周改到目标星期</NRadio></NSpace></NRadioGroup>
         <p class="move-note">{{ describeDayMove(dayMove.sourceDate, dayMove.targetDate, dayMove.scope, dayMoveCourses) }}</p>
@@ -175,13 +197,14 @@
       <template #footer><div class="detail-footer"><NButton @click="showDayMove = false">返回</NButton><NButton type="primary" :disabled="!dayMove.scope || hasPastDayCourse" :loading="savingDayMove" @click="saveDayMove">确认整体调课</NButton></div></template>
     </NModal>
 
-    <div v-if="drag.active" class="drag-ghost" :style="{ left: `${drag.x + 12}px`, top: `${drag.y + 12}px`, ...paletteStyle(drag.item?.teacherId) }">{{ drag.label || drag.item?.name }} · {{ drag.preview || '选择时段' }}</div>
+    <Teleport to="body"><div v-if="drag.active" class="drag-ghost" :style="{ left: `${Math.min(drag.x + 12, viewportWidth - 250)}px`, top: `${Math.max(8, drag.y - 64)}px`, ...paletteStyle(drag.item?.teacherId) }">{{ drag.label || drag.item?.name }}<br />{{ drag.preview || '选择时段' }}</div></Teleport>
   </section>
 </template>
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
 import { teacherStyle } from '../utils/teacherColors.js'
+import { groupScheduleItems } from '../utils/scheduleLayout.js'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NButton, NModal, NRadio, NRadioGroup, NSelect, NSpace } from 'naive-ui'
 import { getCourseOccurrences, getTrialBookings, getStudents, getTeachers, addCourse, rescheduleCourse, rescheduleCourseDay, updateCourse, getScheduleAdjustments, removeScheduleAdjustment } from '../utils/storage.js'
@@ -216,6 +239,9 @@ const referenceError = ref(false)
 const showDetail = ref(false)
 let detailRequest = 0
 const selectedItem = ref(null)
+const showOverlap = ref(false)
+const overlapChoices = ref([])
+const viewportWidth = ref(window.innerWidth)
 const rosterIds = ref([])
 const savingRoster = ref(false)
 const courseEdit = ref({ name: '', classroom: '', hoursPerClass: 1 })
@@ -273,9 +299,13 @@ function studentName(id) { return students.value.find(s => s.id === id)?.name ||
 function paletteStyle(id) { return teacherStyle(id, teachers.value) }
 function isPast(item) { return new Date(`${item.date}T${item.startTime}:00`).getTime() <= Math.max(nowTick.value, Date.now()) }
 function canEdit(item) { return item.type === 'course' && (auth.isAdmin || !!auth.teacherId && auth.teacherId === item.teacherId) }
+function hasScheduleOverlap(item) {
+  return allItems.value.some(other => other.id !== item.id && other.date === item.date && other.startTime < item.endTime && item.startTime < other.endTime)
+}
+function canDrag(item) { return canEdit(item) && !isPast(item) && !hasScheduleOverlap(item) }
 function canMoveWholeDay(date) {
   const courses = (itemsByDate.value[date] || []).filter(canEdit)
-  return courses.length > 0 && courses.every(item => !isPast(item))
+  return courses.length > 0 && courses.every(canDrag)
 }
 function weekdayName(date) { return ['日', '一', '二', '三', '四', '五', '六'][atNoon(date).getDay()] }
 function describeMove(item, targetDate, startTime, endTime, scope) {
@@ -303,14 +333,14 @@ function describeDayMove(sourceDate, targetDate, scope, courses) {
     : `${sourceDate} 的课移到 ${targetDate}，本日不再上课；此后每周${weekdayName(targetDate)}上课（下次 ${addDays(targetDate, 7)}），原星期不再上课（${nextOriginal}、${followingOriginal} 及以后）。`
 }
 
-const visibleItems = computed(() => {
-  const showTeacher = id => teacherFilter.value === 'all' || id === auth.teacherId
-  const courses = occurrences.value.filter(o => showTeacher(o.teacherId)).map(o => ({ ...o, type: 'course' }))
-  const trials = bookings.value.filter(b => b.status === 'active' && !b.courseId && showTeacher(b.teacherId)).map(b => ({
+const allItems = computed(() => {
+  const courses = occurrences.value.map(o => ({ ...o, type: 'course' }))
+  const trials = bookings.value.filter(b => b.status === 'active' && !b.courseId).map(b => ({
     ...b, id: `trial:${b.id}`, type: 'trial', name: '独立试听', studentName: b.studentName
   }))
   return [...courses, ...trials]
 })
+const visibleItems = computed(() => allItems.value.filter(item => teacherFilter.value === 'all' || item.teacherId === auth.teacherId))
 const teacherLegend = computed(() => {
   const byId = new Map()
   for (const item of visibleItems.value) if (item.teacherId) byId.set(item.teacherId, item.teacherName || teachers.value.find(t => t.id === item.teacherId)?.name || '教师')
@@ -329,19 +359,15 @@ const itemsByDate = computed(() => {
       const sharedStudent = a.type === 'course' && b.type === 'course' && a.studentIds.some(id => b.studentIds.includes(id))
       if (a.teacherId === b.teacherId || sharedStudent) { a.hasConflict = true; b.hasConflict = true }
     }
-    let group = [], lanes = [], groupEnd = ''
-    const finishGroup = () => { for (const item of group) item.laneCount = Math.max(1, lanes.length) }
-    for (const item of items) {
-      if (group.length && item.startTime >= groupEnd) { finishGroup(); group = []; lanes = []; groupEnd = '' }
-      let lane = lanes.findIndex(end => end <= item.startTime)
-      if (lane === -1) { lane = lanes.length; lanes.push(item.endTime) } else lanes[lane] = item.endTime
-      item.lane = lane
-      group.push(item)
-      if (!groupEnd || item.endTime > groupEnd) groupEnd = item.endTime
-    }
-    finishGroup()
   }
   return days
+})
+const overlapGroups = computed(() => Object.fromEntries(Object.entries(itemsByDate.value)
+  .map(([date, items]) => [date, groupScheduleItems(items).filter(group => group.items.length > 1)])))
+const dropPreviews = computed(() => {
+  if (!drag.value.target) return []
+  if (drag.value.item) return [{ ...drag.value.item, ...drag.value.target }]
+  return (itemsByDate.value[pointerOrigin?.sourceDate] || []).filter(canEdit)
 })
 const relatedTrials = computed(() => selectedItem.value?.type === 'course'
   ? bookings.value.filter(b => b.status === 'active' && b.courseId === selectedItem.value.courseId && b.occurrenceDate === selectedItem.value.originalDate)
@@ -349,7 +375,7 @@ const relatedTrials = computed(() => selectedItem.value?.type === 'course'
 function itemStyle(item) {
   const top = ((Math.min(END_MIN - 30, Math.max(START_MIN, minutes(item.startTime))) - START_MIN) / 30) * SLOT_PX
   const height = Math.max(SLOT_PX, ((Math.min(END_MIN, minutes(item.endTime)) - Math.max(START_MIN, minutes(item.startTime))) / 30) * SLOT_PX)
-  return { top: `${top}px`, height: `${height}px`, left: `calc(${item.lane / item.laneCount * 100}% + 3px)`, width: `calc(${100 / item.laneCount}% - 6px)` }
+  return { top: `${top}px`, height: `${height}px`, left: '3px', width: 'calc(100% - 6px)' }
 }
 
 let weekRequest = 0
@@ -409,8 +435,13 @@ function applyLinkedDate(value) {
 applyLinkedDate(route.query.date)
 watch(() => route.query.date, applyLinkedDate)
 watch(weekStart, loadWeek)
-async function openItem(item) {
+async function openItem(item, chosen = false) {
   if (suppressClick) return
+  if (item.hasOverlap && !chosen) {
+    overlapChoices.value = overlapGroups.value[item.date]?.find(group => group.items.some(entry => entry.id === item.id))?.items || [item]
+    showOverlap.value = true
+    return
+  }
   const request = ++detailRequest
   selectedItem.value = item
   rosterIds.value = [...(item.studentIds || [])]
@@ -424,6 +455,7 @@ async function openItem(item) {
     } catch (error) { if (request === detailRequest && showDetail.value) toast.error(error.message) }
   }
 }
+function selectOverlapItem(item) { showOverlap.value = false; openItem(item, true) }
 async function saveCourseDetails() {
   if (savingRoster.value) return
   if (!selectedItem.value || !canEdit(selectedItem.value) || isPast(selectedItem.value)) return
@@ -522,6 +554,7 @@ async function saveMove() {
 function openDayMove(sourceDate, targetDate = sourceDate) {
   const courses = (itemsByDate.value[sourceDate] || []).filter(item => canEdit(item))
   if (!courses.length) return toast.error('这一天没有可调整的正式课程')
+  if (courses.some(hasScheduleOverlap)) return toast.error('本日有重叠课程，请先逐节选择处理')
   if (courses.some(isPast)) return toast.error('本日有课程已开始，不能整天调课')
   dayMoveRequest++
   dayMove.value = { sourceDate, targetDate, scope: null }
@@ -532,6 +565,7 @@ async function saveDayMove() {
   const { sourceDate, targetDate, scope } = dayMove.value
   const request = dayMoveRequest
   if (hasPastDayCourse.value) return toast.error('本日有课程已开始，不能整天调课')
+  if (dayMoveCourses.value.some(hasScheduleOverlap)) return toast.error('本日有重叠课程，请先逐节选择处理')
   if (!['once', 'future'].includes(scope)) return toast.error('请先选择整批调课范围')
   if (!sourceDate || !targetDate || sourceDate === targetDate) return toast.error('请选择其他日期')
   if (targetDate < moveMinDate.value || targetDate > moveMaxDate.value) return toast.error('仅可在当前显示的两周内调整')
@@ -549,7 +583,7 @@ async function saveDayMove() {
 }
 
 function startPointer(event, item) {
-  if (!canEdit(item) || isPast(item) || isPhoneLayout() || (event.pointerType === 'mouse' && event.button !== 0)) return
+  if (!canDrag(item) || isPhoneLayout() || (event.pointerType === 'mouse' && event.button !== 0)) return
   if (event.pointerType === 'mouse' && !event.target.closest('.drag-handle')) return
   const touch = event.pointerType !== 'mouse'
   pointerOrigin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, item, touch, ready: !touch, cancelled: false }
@@ -562,7 +596,7 @@ function startPointer(event, item) {
 function startDayPointer(event, sourceDate) {
   if (event.button !== 0 || isPhoneLayout() || sourceDate < today.value) return
   const courses = (itemsByDate.value[sourceDate] || []).filter(item => canEdit(item))
-  if (!courses.length) return
+  if (!canMoveWholeDay(sourceDate)) return
   const touch = event.pointerType !== 'mouse'
   if (!touch) event.preventDefault()
   pointerOrigin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, sourceDate, ready: !touch, cancelled: false }
@@ -581,6 +615,7 @@ function onPointerMove(event) {
   if (!pointerOrigin.ready && distance > 8) { cleanupPointer(); return }
   if (!pointerOrigin.ready || distance < 10) return
   drag.value.active = true
+  viewportWidth.value = window.innerWidth
   drag.value.x = event.clientX; drag.value.y = event.clientY
   event.preventDefault()
   if (pointerOrigin.sourceDate) {
@@ -600,7 +635,7 @@ function onPointerMove(event) {
     drag.value.target = null; drag.value.preview = '此时段不可用'; return
   }
   drag.value.target = { date, startTime: formatMinutes(startMinute), endTime: formatMinutes(startMinute + duration) }
-  drag.value.preview = `${date} ${drag.value.target.startTime}`
+  drag.value.preview = `${date} ${drag.value.target.startTime}—${drag.value.target.endTime}`
 }
 function endPointer(event) {
   if (!pointerOrigin || event.pointerId !== pointerOrigin.pointerId) return
@@ -739,7 +774,7 @@ async function confirmRemoveAdjustment() {
 .course-bar.draggable.compact { padding-right: 21px; }
 .course-bar.compact .bar-meta, .course-bar.compact .bar-bottom { display: none; }
 .loading, .empty { padding: 55px 16px; text-align: center; color: var(--color-text-secondary); }
-.detail-modal, .move-modal { width: min(95vw, 570px); } .detail-modal h2 { font-size: 21px; margin-bottom: 4px; }
+.detail-modal h2 { font-size: 21px; margin-bottom: 4px; }
 .detail-modal p, .move-body p { color: var(--color-text-secondary); }
 .detail-section { border-top: 1px solid var(--color-border); margin-top: 16px; padding-top: 14px; display: grid; gap: 8px; }
 .detail-section label, .create-form label { display: grid; gap: 5px; color: var(--color-text-secondary); font-size: 13px; }
@@ -752,11 +787,21 @@ async function confirmRemoveAdjustment() {
 .trial-student span { color: var(--color-text-secondary); margin-left: 8px; }
 .detail-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .move-body { display: grid; gap: 12px; } .move-course { font-weight: 650; }
-.move-body label { display: grid; gap: 5px; } .move-body input { height: 34px; border: 1px solid var(--color-border); border-radius: 8px; padding: 0 9px; }
+.move-body > label, .move-times > label { display: grid; gap: 5px; }
 .end-time-preview { min-height: 34px; display: flex; align-items: center; font-size: 14px; }
 .move-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .move-note { font-size: 12px; }
 .day-move-list { display: grid; gap: 5px; max-height: 160px; overflow-y: auto; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-secondary); font-size: 12px; }
-.drag-ghost { position: fixed; z-index: 9999; pointer-events: none; background: var(--c-bg); color: var(--c-fg); border: 1px solid var(--c-border); box-shadow: var(--shadow-lg); padding: 9px; border-radius: 7px; font-size: 12px; }
+.drag-ghost { position: fixed; z-index: 9999; pointer-events: none; width: 238px; background: var(--c-bg, var(--color-selected)); color: var(--c-fg, var(--color-primary)); border: 1px solid var(--c-border, var(--color-primary)); box-shadow: var(--shadow-lg); padding: 9px; border-radius: 7px; font-size: 12px; }
+.drop-preview { position: absolute; z-index: 20; pointer-events: none; display: flex; flex-direction: column; overflow: hidden; border: 2px dashed var(--color-primary); border-radius: 6px; padding: 3px; background: rgba(234,243,252,.9); color: var(--color-primary-text); font-size: 10px; box-shadow: 0 0 0 2px white; }
+.overlap-region { position: absolute; z-index: 2; display: flex; flex-direction: column; gap: 2px; overflow: hidden; padding: 2px; border: 2px dashed var(--color-danger); border-radius: 7px; background: #fff6f6; cursor: pointer; text-align: left; font: inherit; }
+.overlap-count { flex-shrink: 0; color: var(--color-danger); font-size: 9px; line-height: 12px; white-space: nowrap; }
+.overlap-region .course-bar { position: relative; inset: auto; flex: 1 1 0; width: 100%; min-height: 0; padding: 1px 3px; border-radius: 3px; outline: none; animation: none; display: flex; flex-direction: column; gap: 0; }
+.overlap-region .bar-name { flex-shrink: 0; font-size: 10px; line-height: 13px; }
+.overlap-time { font-size: 9px; line-height: 11px; white-space: nowrap; }
+.overlap-note { margin-bottom: 14px; color: var(--color-text-secondary); }
+.overlap-options { display: grid; gap: 10px; }
+.overlap-options button { display: grid; gap: 4px; padding: 14px; border: 1px solid var(--c-border); border-radius: var(--radius-sm); background: var(--c-bg); color: var(--c-fg); text-align: left; cursor: pointer; font: inherit; }
+.overlap-options span { font-size: 13px; }
 .mobile-two-weeks { display: none; }
 @media (max-width: 599px) and (max-device-width: 599px), (max-height: 599px) and (max-device-height: 599px) and (min-aspect-ratio: 17/10) and (pointer: coarse) {
   .desktop-hint { display: none; }

@@ -11,7 +11,7 @@
 
     <NCard class="filters" :bordered="false">
       <div class="filter-row">
-        <label>日期 <input v-model="filters.date" type="date" @change="load" /></label>
+        <label>日期 <OfficeDatePicker v-model="filters.date" clearable @change="load" /></label>
         <label>教师 <NSelect v-model:value="filters.teacherId" :options="teacherFilters" clearable placeholder="全部教师" @update:value="load" /></label>
         <label>学生 <NSelect v-model:value="filters.studentId" :options="studentFilters" clearable filterable placeholder="全部学生" @update:value="load" /></label>
         <label>状态 <NSelect v-model:value="filters.status" :options="statusFilters" clearable placeholder="全部状态" @update:value="load" /></label>
@@ -55,7 +55,7 @@
         <label>负责教师 *
           <NSelect v-model:value="form.teacherId" :options="teacherOptions" :disabled="!isAdmin" filterable placeholder="选择教师" @update:value="loadOccurrences(true)" />
         </label>
-        <label>预约日期 * <input v-model="form.date" type="date" :min="today" @change="loadOccurrences(true)" /></label>
+        <label>预约日期 * <OfficeDatePicker v-model="form.date" :min="today" @change="loadOccurrences(true)" /></label>
         <label>对应正式课
           <NSelect v-model:value="form.occurrenceKey" :options="courseOptions" clearable placeholder="不选则为独立试听" @update:value="onCourseChange" />
         </label>
@@ -325,7 +325,6 @@ watch(() => [route.query.date, route.query.booking], async () => {
 .filter-row { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .scope-actions { display: flex; gap: 6px; }
 .filter-row label { flex: 1 1 170px; font-size: 13px; color: var(--color-text-secondary); }
-.filter-row input, .editor-grid input { display: block; width: 100%; height: 34px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 0 10px; background: #fff; color: var(--color-text); }
 .booking-list { display: grid; gap: 12px; }
 .booking-card { box-shadow: var(--shadow-sm); border-left: 3px solid var(--color-trial); }
 .booking-card :deep(.n-card__content) { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
@@ -333,7 +332,6 @@ watch(() => [route.query.date, route.query.booking], async () => {
 .booking-main p { margin: 3px 0; }
 .booking-actions, .modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
 .state { padding: 52px 16px; text-align: center; color: var(--color-text-secondary); background: white; border-radius: var(--radius-lg); }
-.editor-modal { width: min(95vw, 560px); }
 .editor-grid { display: grid; gap: 14px; }
 .editor-grid label { display: grid; gap: 5px; font-size: 14px; color: var(--color-text); }
 .time-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

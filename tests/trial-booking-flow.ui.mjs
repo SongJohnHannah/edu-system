@@ -132,7 +132,7 @@ try {
     await page.evaluate(() => document.querySelector('#app').__vue_app__.config.globalProperties.$router.push('/trial-bookings?date=2099-01-06&booking=booking-2'))
     await editor.waitFor({ state: 'visible', timeout: 10000 })
     assert.equal(await editor.locator('textarea').inputValue(), '第二笔预约', `${device}: same-page booking link did not open its editor`)
-    assert.equal(await page.locator('.filters input[type="date"]').inputValue(), '2099-01-06', `${device}: linked date was not applied`)
+    assert.equal(await page.locator('.filters .office-date-picker input').inputValue(), '2099-01-06', `${device}: linked date was not applied`)
     assert.deepEqual(writes.map(write => write.method), ['PUT', 'CANCEL'], `${device}: linked booking caused an unexpected write`)
 
     students = [{ ...students[0], enrollmentStage: 'enrolled' }]

@@ -90,7 +90,7 @@ try {
     await page.getByRole('button', { name: '上月' }).click()
     if (await page.locator('.current-month').textContent() === month) throw new Error(`${width}px: 上月导航无效`)
     await page.getByRole('button', { name: '下月' }).click()
-    await page.getByRole('button', { name: '今天' }).click()
+    await page.getByRole('button', { name: '今天', exact: true }).click()
     if (await page.locator('.current-month').textContent() !== month) throw new Error(`${width}px: 今日导航未返回本月`)
     delayOtherMonth = true
     const slowRequest = page.waitForRequest(request => {
@@ -101,7 +101,7 @@ try {
     await slowRequest
     if (!await page.getByRole('button', { name: '上月' }).isDisabled()) throw new Error(`${width}px: 日历加载时仍允许再次翻月`)
     await page.getByRole('button', { name: '上月' }).click()
-    await page.getByRole('button', { name: '今天' }).click()
+    await page.getByRole('button', { name: '今天', exact: true }).click()
     await detail.getByText('试听乙').waitFor({ state: 'visible' })
     await page.waitForTimeout(450)
     if (await detail.getByText('过期月份课程').count()) throw new Error(`${width}px: 慢请求覆盖了当前月份课程`)

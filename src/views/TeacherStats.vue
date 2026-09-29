@@ -22,9 +22,9 @@
         </button>
       </div>
       <div class="custom-range" v-if="activePreset === 'custom'">
-        <input type="date" class="input date-input" v-model="customStartDate" />
+        <OfficeDatePicker class="input date-input" v-model="customStartDate" aria-label="开始日期" />
         <span class="date-separator">至</span>
-        <input type="date" class="input date-input" v-model="customEndDate" />
+        <OfficeDatePicker class="input date-input" v-model="customEndDate" aria-label="结束日期" />
         <OfficeButton class="btn btn-primary btn-sm" @click="applyCustomRange">应用</OfficeButton>
       </div>
       <div class="current-range">

@@ -80,7 +80,7 @@ try {
   await touch('touchEnd', nextWeekPoint.x, nextWeekPoint.y)
   const crossWeekMove = page.locator('.move-modal').filter({ hasText: '确认调课' })
   await crossWeekMove.waitFor({ state: 'visible' })
-  if (await crossWeekMove.locator('input[type="date"]').inputValue() !== '2026-10-07') {
+  if (await crossWeekMove.locator('.office-date-picker input').inputValue() !== '2026-10-07') {
     throw new Error('iPad 单节跨周触屏拖动没有选中第二周日期')
   }
 
@@ -98,7 +98,7 @@ try {
   await touch('touchEnd', to.x, to.y)
   const dayModal = page.locator('.move-modal').filter({ hasText: '整天调课确认' })
   await dayModal.waitFor({ state: 'visible' })
-  if (await dayModal.locator('input[type="date"]').inputValue() !== '2026-10-01') throw new Error('iPad 整天触屏拖动没有选中目标日期')
+  if (await dayModal.locator('.office-date-picker input').inputValue() !== '2026-10-01') throw new Error('iPad 整天触屏拖动没有选中目标日期')
   await page.goto('http://127.0.0.1:4174/weekly-schedule', { waitUntil: 'domcontentloaded' })
   const crossWeekDayHandle = page.getByRole('button', { name: `拖动或点击整体调整 ${date} 的课程` })
   await crossWeekDayHandle.waitFor({ state: 'visible' })
@@ -110,7 +110,7 @@ try {
   await page.waitForTimeout(80)
   await touch('touchEnd', crossWeekDestination.x + crossWeekDestination.width / 2, crossWeekDestination.y + crossWeekDestination.height / 2)
   await dayModal.waitFor({ state: 'visible' })
-  if (await dayModal.locator('input[type="date"]').inputValue() !== '2026-10-07') {
+  if (await dayModal.locator('.office-date-picker input').inputValue() !== '2026-10-07') {
     throw new Error('iPad 整天跨周触屏拖动没有选中第二周日期')
   }
   if (errors.length) throw new Error(errors.join('; '))

@@ -16,33 +16,8 @@
 <div class="scope-filter"><OfficeButton :class="{ 'btn-primary': scopeFilter === 'all' }" :aria-pressed="scopeFilter === 'all'" @click="scopeFilter = 'all'">全部日程</OfficeButton><OfficeButton v-if="auth.teacherId" :class="{ 'btn-primary': scopeFilter === 'mine' }" :aria-pressed="scopeFilter === 'mine'" @click="scopeFilter = 'mine'">我的日程</OfficeButton></div>
     <div v-if="loading" class="empty-state" role="status">正在加载日历…</div>
     <div v-else-if="loadError" class="empty-state" role="alert"><p>日历数据加载失败，请重试</p><OfficeButton class="btn btn-secondary" @click="loadPage">重试</OfficeButton></div>
-    <div class="calendar-container" v-else>
-      <div class="calendar-header">
-        <span v-for="day in weekDays" :key="day" class="week-day">{{ day }}</span>
-      </div>
-      <div class="calendar-body">
-        <div
-          v-for="(day, index) in calendarDays"
-          :key="index"
-          class="calendar-day"
-          :class="{
-            'other-month': day.otherMonth,
-            'today': day.isToday,
-            'has-attendance': day.hasAttendance,
-            'selected': selectedDate === day.dateStr
-          }"
-          @click="selectDate(day)"
-          @mouseenter="showTooltip(day, $event)"
-          @mouseleave="hideTooltip"
-        >
-          <span class="day-number">{{ day.day }}</span>
-          <span class="course-dot" v-if="day.courses && day.courses.length > 0 && !day.hasAttendance"></span>
-          <span class="trial-dot" v-if="day.trials?.length"></span>
-          <span class="attendance-dot" v-if="day.hasAttendance"></span>
-          <span class="attendance-count" v-if="day.attendanceCount">{{ day.attendanceCount }}人</span>
-        </div>
-      </div>
-    </div>
+    <OfficeMonthCalendar v-else v-model="selectedDate" :days="calendarDays"
+      @day-hover="showTooltip" @day-leave="hideTooltip" />
 
     <!-- Tooltip -->
     <div class="calendar-tooltip" v-if="!loading && !loadError && tooltipVisible" :style="tooltipStyle">
@@ -111,6 +86,7 @@
 </template>
 
 <script setup>
+import OfficeMonthCalendar from '../components/OfficeMonthCalendar.vue'
 import { teacherStyle } from '../utils/teacherColors.js'
 import { useAuthStore } from '../stores/auth.js'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
@@ -141,7 +117,6 @@ const tooltipData = ref({
   attendanceCount: 0
 })
 
-const weekDays = ['日', '一', '二', '三', '四', '五', '六']
 
 let referencesReady = false
 let pageRequest = 0
@@ -370,10 +345,6 @@ function goToday() {
   selectedDate.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 
-function selectDate(day) {
-  selectedDate.value = day.dateStr
-}
-
 // Tooltip 函数
 function showTooltip(day, event) {
   tooltipData.value = {
@@ -383,7 +354,7 @@ function showTooltip(day, event) {
     attendanceCount: day.attendanceCount || 0
   }
 
-  const rect = event.target.getBoundingClientRect()
+  const rect = event.currentTarget.getBoundingClientRect()
   let left = rect.left + rect.width / 2
   let top = rect.top - 10
 
@@ -455,119 +426,6 @@ function hideTooltip() {
   color: var(--color-text);
   min-width: 120px;
   text-align: center;
-}
-
-.calendar-container {
-  background: white;
-  border-radius: var(--radius-lg);
-  padding: 24px;
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 24px;
-}
-
-.calendar-header {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  margin-bottom: 16px;
-}
-
-.week-day {
-  text-align: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  padding: 8px;
-}
-
-.calendar-body {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
-}
-
-.calendar-day {
-  aspect-ratio: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: var(--transition);
-  position: relative;
-  min-height: 60px;
-}
-
-.calendar-day:hover {
-  background: var(--color-bg-secondary);
-}
-
-.calendar-day.other-month {
-  opacity: 0.4;
-}
-
-.calendar-day.today {
-  background: var(--color-primary);
-  color: white;
-}
-
-.calendar-day.today:hover {
-  background: var(--color-primary-hover);
-}
-
-.calendar-day.has-attendance {
-  background: rgba(65, 120, 185, 0.1);
-}
-
-.calendar-day.today.has-attendance {
-  background: var(--color-primary);
-}
-
-.calendar-day.selected {
-  box-shadow: 0 0 0 2px var(--color-primary);
-}
-
-.day-number {
-  font-size: 15px;
-  font-weight: 500;
-}
-
-.attendance-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-primary);
-  position: absolute;
-  top: 8px;
-  right: 8px;
-}
-
-.course-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-success);
-  position: absolute;
-  top: 8px;
-  right: 8px;
-}
-
-.calendar-day.today .attendance-dot {
-  background: white;
-}
-
-.calendar-day.today .course-dot {
-  background: white;
-}
-
-.attendance-count {
-  font-size: 11px;
-  color: var(--color-primary);
-  margin-top: 2px;
-}
-
-.calendar-day.today .attendance-count {
-  color: rgba(255, 255, 255, 0.9);
 }
 
 /* Tooltip 样式 */
@@ -756,36 +614,6 @@ function hideTooltip() {
   .current-month {
     font-size: 15px;
     min-width: auto;
-  }
-
-  .calendar-container {
-    padding: 12px;
-    border-radius: var(--radius-md);
-  }
-
-  .calendar-body {
-    gap: 2px;
-  }
-
-  .calendar-day {
-    aspect-ratio: 1;
-    min-height: 0;
-    border-radius: 6px;
-  }
-
-  .day-number {
-    font-size: 13px;
-  }
-
-  .attendance-count {
-    font-size: 9px;
-  }
-
-  .attendance-dot {
-    width: 4px;
-    height: 4px;
-    top: 4px;
-    right: 4px;
   }
 
   .calendar-tooltip {
