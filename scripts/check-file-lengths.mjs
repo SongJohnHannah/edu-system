@@ -6,7 +6,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const baseline = new Set(JSON.parse(fs.readFileSync(path.join(root, 'scripts', 'line-limit-baseline.json'), 'utf8')))
 const extensions = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.vue', '.css', '.scss', '.sql', '.md', '.json', '.html', '.yml', '.yaml', '.toml', '.xml', '.sh', '.ps1'])
 const excludedDirectories = new Set(['.git', '.qa', 'node_modules', 'dist', 'release', 'coverage', 'test-results', 'playwright-report'])
-const excludedFiles = new Set(['package-lock.json', 'edu_system_snapshot.sql'])
+const excludedFiles = new Set(['package-lock.json', 'pnpm-lock.yaml', 'edu_system_snapshot.sql'])
 const failures = []
 
 function checkFile(absolute) {
