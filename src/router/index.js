@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 
 const routes = [
   {
@@ -25,8 +25,7 @@ const routes = [
   {
     path: '/teachers',
     name: 'Teachers',
-    component: () => import('../views/Teachers.vue'),
-    meta: { adminOnly: true }
+    component: () => import('../views/Teachers.vue')
   },
   {
     path: '/courses',
@@ -49,6 +48,11 @@ const routes = [
     component: () => import('../views/WeeklySchedule.vue')
   },
   {
+    path: '/trial-bookings',
+    name: 'TrialBookings',
+    component: () => import('../views/TrialBookings.vue')
+  },
+  {
     path: '/teacher-stats',
     name: 'TeacherStats',
     component: () => import('../views/TeacherStats.vue')
@@ -66,21 +70,17 @@ const routes = [
   }
 ]
 
-const isElectron = typeof window !== 'undefined' && window.location.protocol === 'file:'
-
 const router = createRouter({
-  history: isElectron ? createWebHashHistory() : createWebHistory(),
+  history: createWebHistory(),
   routes
 })
 
 router.beforeEach((to, from, next) => {
-  const useApi = import.meta.env.VITE_USE_API === 'true'
-  if (!useApi) {
-    return next()
-  }
-
   const userStr = localStorage.getItem('user')
-  const isAuthenticated = !!userStr
+  let user = null
+  try { user = JSON.parse(userStr || 'null') } catch { /* Invalid cached login. */ }
+  const isAuthenticated = (user?.role === 'admin' || (user?.role === 'teacher' && !!user.teacherId)) &&
+    !!(localStorage.getItem('access_token') || localStorage.getItem('refresh_token'))
 
   if (to.path === '/login') {
     if (isAuthenticated) return next('/')
@@ -92,14 +92,7 @@ router.beforeEach((to, from, next) => {
   }
 
   if (to.meta.adminOnly) {
-    try {
-      const user = JSON.parse(userStr)
-      if (user.role !== 'admin') {
-        return next('/')
-      }
-    } catch {
-      return next('/login')
-    }
+    if (user.role !== 'admin') return next('/')
   }
 
   next()

@@ -3,8 +3,12 @@ import { ref, computed } from 'vue'
 import { api, setTokens, clearTokens } from '../utils/api.js'
 
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
-  const isAuthenticated = computed(() => !!user.value)
+  let savedUser = null
+  try { savedUser = JSON.parse(localStorage.getItem('user') || 'null') } catch { clearTokens() }
+  const user = ref(savedUser)
+  const isAuthenticated = computed(() =>
+    (user.value?.role === 'admin' || (user.value?.role === 'teacher' && !!user.value.teacherId)) &&
+    !!(localStorage.getItem('access_token') || localStorage.getItem('refresh_token')))
 
   const isAdmin = computed(() => user.value?.role === 'admin')
   const isTeacher = computed(() => user.value?.role === 'teacher')
@@ -33,7 +37,7 @@ export const useAuthStore = defineStore('auth', () => {
   function loadFromStorage() {
     const saved = localStorage.getItem('user')
     if (saved) {
-      user.value = JSON.parse(saved)
+      try { user.value = JSON.parse(saved) } catch { logout() }
     }
   }
 

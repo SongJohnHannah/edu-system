@@ -1,92 +1,32 @@
-name: Build Electron App
+name: Build Web App
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [dev]
+  pull_request:
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-mac:
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build and package
-        run: npm run electron:build:mac
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        timeout-minutes: 15
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac-build
-          path: release/*
-          retention-days: 30
-
-  build-win:
-    runs-on: windows-latest
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build and package
-        run: npm run electron:build
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        timeout-minutes: 15
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: win-build
-          path: release/*
-          retention-days: 30
-
-  create-release:
-    needs: [build-mac, build-win]
+  build-and-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Download Mac artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          name: mac-build
-          path: release/
-
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: win-build
-          path: release/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: release/*
-          generate_release_notes: true
+          node-version: '20'
+          cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Test frontend logic
+        run: npm run test:unit
+      - name: Build web app
+        run: npm run build
+      - name: Install backend dependencies
+        run: npm --prefix server ci
+      - name: Test backend logic
+        run: npm --prefix server test

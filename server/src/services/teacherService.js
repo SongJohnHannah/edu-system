@@ -2,6 +2,9 @@ import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
 import * as authService from './authService.js'
 import { formatDateTime } from '../utils/dateFormat.js'
+import { randomBytes } from 'node:crypto'
+import { acquireScheduleLock, closeScheduleConnection, futureTrialWindow, iso, listOccurrences } from './scheduleService.js'
+import { acquireTeacherIdentityLock, closeTeacherIdentityConnection } from './teacherIdentityLock.js'
 
 function formatTeacher(row) {
   return {
@@ -12,18 +15,19 @@ function formatTeacher(row) {
   }
 }
 
-export async function getAll(teacherScope) {
-  if (!teacherScope) {
-    const [rows] = await pool.execute("SELECT * FROM teachers WHERE status != 'deleted' ORDER BY created_at DESC")
-    return enrichTeachersWithUserId(rows.map(formatTeacher))
-  }
-  const [rows] = await pool.execute('SELECT * FROM teachers WHERE id = ? AND status != ?', [teacherScope, 'deleted'])
-  return enrichTeachersWithUserId(rows.map(formatTeacher))
+function assertFieldLength(value, limit, label) {
+  if ([...value].length > limit) throw Object.assign(new Error(`${label}不能超过${limit}个字符`), { status: 400 })
 }
 
-async function enrichTeachersWithUserId(teachers) {
+export async function getAll(teacherScope) {
+  const [rows] = await pool.execute(`SELECT * FROM teachers ORDER BY created_at DESC`)
+  const formatted = rows.map(formatTeacher)
+  return teacherScope ? formatted : enrichTeachersWithUserId(formatted)
+}
+
+async function enrichTeachersWithUserId(teachers, db = pool) {
   if (teachers.length === 0) return teachers
-  const [users] = await pool.execute('SELECT id, teacher_id FROM users WHERE teacher_id IS NOT NULL')
+  const [users] = await db.execute('SELECT id, teacher_id FROM users WHERE teacher_id IS NOT NULL')
   const userMap = new Map(users.map(u => [u.teacher_id, u.id]))
   return teachers.map(t => {
     if (userMap.has(t.id)) {
@@ -38,138 +42,180 @@ export async function getById(id) {
   return rows[0] ? formatTeacher(rows[0]) : null
 }
 
-const DEFAULT_PASSWORD = '123456'
-
 export async function create(data) {
+  const name = String(data?.name ?? '').trim()
+  if (!name) throw Object.assign(new Error('请输入教师姓名'), { status: 400 })
+  const phone = String(data.phone ?? '').trim()
+  const subject = String(data.subject ?? '')
+  assertFieldLength(name, 100, '教师姓名')
+  assertFieldLength(phone, 20, '联系电话')
+  assertFieldLength(subject, 100, '教授科目')
   const conn = await pool.getConnection()
+  let identityLocked = false
   try {
+    await acquireTeacherIdentityLock(conn)
+    identityLocked = true
     await conn.beginTransaction()
 
-    // 检查重名（加锁防止并发创建）
-    const [existing] = await conn.execute('SELECT id FROM teachers WHERE name = ? FOR UPDATE', [data.name])
-    if (existing.length > 0) throw new Error('教师姓名已存在')
+    // 身份锁串行化查重与写入，兼顾尚无匹配行的并发创建。
+    const [existing] = await conn.execute('SELECT id FROM teachers WHERE TRIM(name) = ? FOR UPDATE', [name])
+    if (existing.length > 0) throw Object.assign(new Error('教师姓名已存在'), { status: 409 })
 
     // 检查手机号重复
-    if (data.phone) {
-      const [phoneCheck] = await conn.execute('SELECT id FROM teachers WHERE phone = ? AND id != ? FOR UPDATE', [data.phone, ''])
-      if (phoneCheck.length > 0) throw new Error('该手机号已被其他教师使用')
+    if (phone) {
+      const [phoneCheck] = await conn.execute('SELECT id FROM teachers WHERE TRIM(phone) = ? FOR UPDATE', [phone])
+      if (phoneCheck.length > 0) throw Object.assign(new Error('该手机号已被其他教师使用'), { status: 409 })
     }
 
     const id = generateId()
     await conn.execute(
       'INSERT INTO teachers (id, name, phone, subject, remark, is_test) VALUES (?, ?, ?, ?, ?, ?)',
-      [id, data.name, data.phone || '', data.subject || '', data.remark || '', data.isTest ? 1 : 0]
+      [id, name, phone, subject, data.remark || '', data.isTest ? 1 : 0]
     )
 
-    const username = data.phone || `teacher_${id}`
+    let username = phone || `teacher_${id}`
+    const initialPassword = randomBytes(9).toString('base64url')
     const isTest = !!data.isTest
+    let createdUser
     try {
-      await authService.createUser({
+      createdUser = await authService.createUser({
         username,
-        password: DEFAULT_PASSWORD,
+        password: initialPassword,
         role: 'teacher',
         teacherId: id,
-        displayName: data.name,
+        displayName: name,
         isTest
-      })
+      }, conn)
     } catch (err) {
       if (err.message?.includes('Duplicate')) {
-        await authService.createUser({
-          username: `teacher_${id}`,
-          password: DEFAULT_PASSWORD,
+        username = `teacher_${id}`
+        createdUser = await authService.createUser({
+          username,
+          password: initialPassword,
           role: 'teacher',
           teacherId: id,
-          displayName: data.name,
+          displayName: name,
           isTest
-        })
+        }, conn)
       } else {
         throw err
       }
     }
 
-    await conn.commit()
-    const [rows] = await pool.execute('SELECT * FROM teachers WHERE id = ?', [id])
+    const [rows] = await conn.execute('SELECT * FROM teachers WHERE id = ?', [id])
     const teacher = formatTeacher(rows[0])
-    return { ...teacher, defaultPassword: DEFAULT_PASSWORD, username }
+    const result = { ...teacher, userId: createdUser.id, defaultPassword: initialPassword, username }
+    await conn.commit()
+    return result
   } catch (err) {
     await conn.rollback()
     throw err
   } finally {
-    conn.release()
+    await closeTeacherIdentityConnection(conn, identityLocked)
   }
 }
 
 export async function update(id, data) {
-  const [existing] = await pool.execute('SELECT * FROM teachers WHERE id = ?', [id])
-  if (existing.length === 0) throw new Error('教师不存在')
+  if (!data || typeof data !== 'object') throw Object.assign(new Error('教师资料无效'), { status: 400 })
+  const name = data.name === undefined ? undefined : String(data.name).trim()
+  if (name !== undefined && !name) throw Object.assign(new Error('请输入教师姓名'), { status: 400 })
+  const phone = data.phone === undefined ? undefined : String(data.phone ?? '').trim()
+  const subject = data.subject === undefined ? undefined : String(data.subject ?? '')
+  if (name !== undefined) assertFieldLength(name, 100, '教师姓名')
+  if (phone !== undefined) assertFieldLength(phone, 20, '联系电话')
+  if (subject !== undefined) assertFieldLength(subject, 100, '教授科目')
+  const conn = await pool.getConnection()
+  let identityLocked = false
+  try {
+  await acquireTeacherIdentityLock(conn)
+  identityLocked = true
+  await conn.beginTransaction()
+  const [existing] = await conn.execute('SELECT * FROM teachers WHERE id = ? FOR UPDATE', [id])
+  if (existing.length === 0) throw Object.assign(new Error('教师不存在'), { status: 404 })
 
   // 检查重名（排除自身）
-  if (data.name) {
-    const [dup] = await pool.execute('SELECT id FROM teachers WHERE name = ? AND id != ?', [data.name, id])
-    if (dup.length > 0) throw new Error('教师姓名已存在')
+  if (name !== undefined) {
+    const [dup] = await conn.execute('SELECT id FROM teachers WHERE TRIM(name) = ? AND id != ?', [name, id])
+    if (dup.length > 0) throw Object.assign(new Error('教师姓名已存在'), { status: 409 })
   }
 
   // 检查手机号重复（排除自身）
-  if (data.phone) {
-    const [phoneDup] = await pool.execute('SELECT id FROM teachers WHERE phone = ? AND id != ?', [data.phone, id])
-    if (phoneDup.length > 0) throw new Error('该手机号已被其他教师使用')
+  if (phone) {
+    const [phoneDup] = await conn.execute('SELECT id FROM teachers WHERE TRIM(phone) = ? AND id != ?', [phone, id])
+    if (phoneDup.length > 0) throw Object.assign(new Error('该手机号已被其他教师使用'), { status: 409 })
   }
 
   const t = existing[0]
-  const newPhone = data.phone !== undefined ? data.phone : t.phone
-  await pool.execute(
+  const newPhone = phone !== undefined ? phone : t.phone
+  await conn.execute(
     'UPDATE teachers SET name = ?, phone = ?, subject = ?, remark = ? WHERE id = ?',
     [
-      data.name ?? t.name,
+      name ?? t.name,
       newPhone,
-      data.subject !== undefined ? data.subject : t.subject,
+      subject !== undefined ? subject : t.subject,
       data.remark !== undefined ? data.remark : t.remark,
       id
     ]
   )
 
   // 同步 display_name
-  if (data.name) {
-    await pool.execute('UPDATE users SET display_name = ? WHERE teacher_id = ?', [data.name, id])
+  if (name !== undefined) {
+    await conn.execute('UPDATE users SET display_name = ? WHERE teacher_id = ?', [name, id])
   }
 
   // 同步更新登录用户名（联系电话 = 登录账号）
   if (newPhone && newPhone !== t.phone) {
-    const [dupUser] = await pool.execute('SELECT id FROM users WHERE username = ? AND teacher_id != ?', [newPhone, id])
-    if (dupUser.length > 0) throw new Error('该手机号已被其他账号使用')
-    await pool.execute('UPDATE users SET username = ? WHERE teacher_id = ?', [newPhone, id])
+    const [dupUser] = await conn.execute('SELECT id FROM users WHERE TRIM(username) = ? AND (teacher_id IS NULL OR teacher_id != ?)', [newPhone, id])
+    if (dupUser.length > 0) throw Object.assign(new Error('该手机号已被其他账号使用'), { status: 409 })
+    await conn.execute('UPDATE users SET username = ? WHERE teacher_id = ?', [newPhone, id])
   }
 
-  const [rows] = await pool.execute('SELECT * FROM teachers WHERE id = ?', [id])
-  return formatTeacher(rows[0])
+  const [rows] = await conn.execute('SELECT * FROM teachers WHERE id = ?', [id])
+  const result = formatTeacher(rows[0])
+  await conn.commit()
+  return result
+  } catch (error) { await conn.rollback(); throw error }
+  finally { await closeTeacherIdentityConnection(conn, identityLocked) }
 }
 
 export async function remove(id) {
-  const [courses] = await pool.execute('SELECT id FROM courses WHERE teacher_id = ?', [id])
-  if (courses.length > 0) throw new Error('该教师仍有课程，请先交接或删除课程')
-
-  const conn = await pool.getConnection()
-  try {
-    await conn.beginTransaction()
-    await conn.execute('DELETE FROM users WHERE teacher_id = ?', [id])
-    await conn.execute('DELETE FROM teachers WHERE id = ?', [id])
-    await conn.commit()
-  } catch (err) {
-    await conn.rollback()
-    throw err
-  } finally {
-    conn.release()
-  }
+  return updateStatus(id, 'deleted')
 }
 
 export async function updateStatus(id, status) {
-  if (status === 'deleted') {
-    const [courses] = await pool.execute('SELECT id FROM courses WHERE teacher_id = ?', [id])
-    if (courses.length > 0) throw new Error('该教师仍有课程，请先交接或删除课程')
-  }
-  await pool.execute('UPDATE teachers SET status = ? WHERE id = ?', [status, id])
-  const isActive = status === 'active'
-  await pool.execute('UPDATE users SET is_active = ? WHERE teacher_id = ?', [isActive, id])
-  const [rows] = await pool.execute('SELECT * FROM teachers WHERE id = ?', [id])
-  return rows[0] ? enrichTeachersWithUserId([formatTeacher(rows[0])]) : null
+  if (!['active', 'deleted'].includes(status)) throw Object.assign(new Error('无效的教师状态'), { status: 400 })
+  const conn = await pool.getConnection()
+  let locked = false
+  try {
+    await acquireScheduleLock(conn)
+    locked = true
+    await conn.beginTransaction()
+    const [existing] = await conn.execute('SELECT id FROM teachers WHERE id = ? FOR UPDATE', [id])
+    if (!existing.length) throw Object.assign(new Error('教师不存在'), { status: 404 })
+    if (status === 'deleted') {
+      const [courses] = await conn.execute('SELECT id FROM courses WHERE teacher_id = ? AND archived_at IS NULL LIMIT 1', [id])
+      if (courses.length) throw Object.assign(new Error('该教师仍有课程，请先交接或归档课程'), { status: 409 })
+      const future = futureTrialWindow()
+      const [trials] = await conn.execute(
+        `SELECT id FROM trial_bookings WHERE teacher_id = ? AND status = 'active' AND ${future.clause} LIMIT 1`,
+        [id, ...future.params]
+      )
+      if (trials.length) throw Object.assign(new Error('请先处理该教师未来的试听预约'), { status: 409 })
+      const [substitutions] = await conn.execute(`SELECT s.id, COALESCE(m.target_date, s.original_date) AS actual_date FROM course_substitutions s
+        JOIN courses c ON c.id = s.course_id LEFT JOIN course_occurrence_changes m ON m.course_id = s.course_id AND m.original_date = s.original_date
+        WHERE s.teacher_id = ? AND s.status = 'active' AND c.archived_at IS NULL
+        AND COALESCE(m.target_date, s.original_date) >= ?`, [id, future.params[0]])
+      const futureSubstitution = substitutions.some(row => iso(row.actual_date) > future.params[0])
+      const todaySubstitution = substitutions.length && (await listOccurrences(future.params[0], future.params[0], conn))
+        .some(row => row.substitution && row.teacherId === id && row.startTime > future.params[2])
+      if (futureSubstitution || todaySubstitution) throw Object.assign(new Error('请先处理该教师未来的临时代课'), { status: 409 })
+    }
+    await conn.execute('UPDATE teachers SET status = ? WHERE id = ?', [status, id])
+    await conn.execute('UPDATE users SET is_active = ? WHERE teacher_id = ?', [status === 'active', id])
+    const [rows] = await conn.execute('SELECT * FROM teachers WHERE id = ?', [id])
+    const result = rows[0] ? await enrichTeachersWithUserId([formatTeacher(rows[0])], conn) : null
+    await conn.commit()
+    return result
+  } catch (error) { await conn.rollback(); throw error }
+  finally { await closeScheduleConnection(conn, locked) }
 }

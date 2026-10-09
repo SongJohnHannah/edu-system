@@ -1,216 +1,92 @@
 <template>
+  <NConfigProvider :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
   <div class="app">
     <div class="global-progress" :class="{ active: apiLoading, done: apiLoadingDone }">
       <div class="global-progress-bar"></div>
     </div>
     <!-- 桌面端顶部导航 -->
-    <header v-if="!isLoginPage" class="header desktop-nav" :class="{ 'header-electron': isElectronEnv }">
+    <header v-if="!isLoginPage" class="header desktop-nav">
       <div class="header-content">
         <div class="logo">
-          <svg width="32" height="32" viewBox="0 0 100 100">
-            <rect width="100" height="100" rx="20" fill="#1d1d1f"/>
-            <text x="50" y="65" font-size="50" text-anchor="middle" fill="white" font-family="Inter, sans-serif" font-weight="600">教</text>
-          </svg>
-          <span class="logo-text">嘉言思听教务系统 <span class="version">v{{ appVersion }}</span></span>
+          <BrandLogo />
+          <span class="logo-text">教务系统</span>
         </div>
-        <nav class="nav" ref="navRef">
-          <router-link to="/" class="nav-item" exact-active-class="active">首页</router-link>
-          <router-link to="/students" class="nav-item" active-class="active">学生</router-link>
-          <router-link to="/courses" class="nav-item" active-class="active">课程安排</router-link>
-          <router-link to="/weekly-schedule" class="nav-item" active-class="active">周排课</router-link>
-          <router-link to="/attendance" class="nav-item" active-class="active">点名</router-link>
-          <router-link to="/calendar" class="nav-item" active-class="active">日历</router-link>
+        <nav class="nav">
+          <AppNavLink v-for="item in primaryNavItems" :key="item.to" :item="item" link-class="nav-item" active-class="active" />
           <div class="nav-more">
-            <button class="nav-item nav-more-btn" :class="{ active: showNavMore }" @click.stop="showNavMore = !showNavMore">
+            <button class="nav-item nav-more-btn" :class="{ active: showNavMore || moreNavActive }" :aria-expanded="showNavMore" @click.stop="showNavMore = !showNavMore; showAccountMenu = false">
               更多
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
             <div class="nav-more-dropdown" v-if="showNavMore" @click.stop>
-              <router-link to="/teachers" class="nav-more-item" @click="showNavMore = false" v-if="isAdmin">教师管理</router-link>
-              <router-link to="/teacher-stats" class="nav-more-item" @click="showNavMore = false">教师统计</router-link>
-              <router-link to="/handovers" class="nav-more-item" @click="showNavMore = false" v-if="isAdmin">交接记录</router-link>
+              <AppNavLink v-for="item in moreNavItems" :key="item.to" :item="item" link-class="nav-more-item" @select="showNavMore = false" />
             </div>
           </div>
         </nav>
-        <div class="header-actions">
-          <router-link to="/profile" class="user-info" v-if="useApi && authUser">
-            {{ authUser.displayName }}
-            <span class="user-role" :class="authUser.role">{{ roleLabel }}</span>
-          </router-link>
-          <button class="btn btn-secondary btn-sm" @click="showBackupModal = true" v-if="isAdmin">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            <span>数据备份</span>
-          </button>
-          <button class="btn btn-secondary btn-sm" @click="handleLogout" v-if="useApi && authUser">
-            退出登录
-          </button>
+        <div class="header-actions" v-if="authUser">
+          <div class="account-menu">
+            <button type="button" class="account-trigger" :aria-expanded="showAccountMenu" aria-controls="account-actions" @click.stop="showAccountMenu = !showAccountMenu; showNavMore = false">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg>
+              <span>账户</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <div v-if="showAccountMenu" id="account-actions" class="account-dropdown" @click.stop>
+              <div class="account-summary"><strong :title="authUser.displayName">{{ authUser.displayName }}</strong><span v-if="showRoleLabel">{{ roleLabel }}</span></div>
+              <AppNavLink :item="accountNavItem" link-class="account-action" @select="showAccountMenu = false" />
+              <button v-if="isAdmin" type="button" class="account-action" @click="showAccountMenu = false; showBackupModal = true">数据备份与恢复</button>
+              <button type="button" class="account-action account-logout" @click="showAccountMenu = false; handleLogout()">退出登录</button>
+              <div class="account-version">v{{ appVersion }}</div>
+            </div>
+          </div>
         </div>
       </div>
     </header>
 
-    <!-- 移动端顶部栏 -->
-    <header v-if="!isLoginPage" class="mobile-header">
-      <div class="mobile-header-content">
-        <div class="mobile-logo">
-          <svg width="28" height="28" viewBox="0 0 100 100">
-            <rect width="100" height="100" rx="20" fill="#1d1d1f"/>
-            <text x="50" y="65" font-size="50" text-anchor="middle" fill="white" font-family="Inter, sans-serif" font-weight="600">教</text>
-          </svg>
-          <span class="mobile-title">{{ currentPageTitle }}</span>
-        </div>
-        <div class="mobile-actions">
-          <button class="mobile-icon-btn" @click="showBackupModal = true" v-if="isAdmin" title="数据备份">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-          </button>
-          <router-link to="/profile" class="mobile-icon-btn" v-if="useApi && authUser" title="个人资料">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-              <circle cx="12" cy="7" r="4"/>
-            </svg>
-          </router-link>
-          <button class="mobile-icon-btn" @click="handleLogout" v-if="useApi && authUser" title="退出">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-              <polyline points="16 17 21 12 16 7"/>
-              <line x1="21" y1="12" x2="9" y2="12"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-    </header>
-    <main class="main">
+    <main class="main" :class="{ 'main-login': isLoginPage }">
       <router-view v-slot="{ Component }">
-        <transition name="fade" mode="out-in">
-          <component :is="Component" />
-        </transition>
+        <component :is="Component" />
       </router-view>
     </main>
 
     <!-- 移动端底部 Tab 栏 -->
     <nav v-if="!isLoginPage" class="mobile-tab-bar">
-      <router-link to="/" class="tab-item" exact-active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-          <polyline points="9 22 9 12 15 12 15 22"/>
-        </svg>
-        <span>首页</span>
-      </router-link>
-      <router-link to="/students" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-        </svg>
-        <span>学生</span>
-      </router-link>
-      <router-link to="/courses" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-        <span>课程安排</span>
-      </router-link>
-      <router-link to="/weekly-schedule" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-          <line x1="3" y1="10" x2="21" y2="10"/>
-          <line x1="8" y1="2" x2="8" y2="6"/>
-          <line x1="16" y1="2" x2="16" y2="6"/>
-        </svg>
-        <span>周排课</span>
-      </router-link>
-      <router-link to="/attendance" class="tab-item" active-class="tab-active">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M9 11l3 3L22 4"/>
-          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-        </svg>
-        <span>点名</span>
-      </router-link>
-      <a class="tab-item" :class="{ 'tab-active': showMoreMenu }" @click.prevent="showMoreMenu = !showMoreMenu">
+      <AppNavLink v-for="item in primaryNavItems" :key="item.to" :item="item" link-class="tab-item" active-class="tab-active" show-icon :icon-size="22" />
+      <button type="button" class="tab-item" :class="{ 'tab-active': showMoreMenu || moreMobileActive }" :aria-expanded="showMoreMenu" aria-controls="mobile-more-actions" @click="showMoreMenu = !showMoreMenu">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
         </svg>
         <span>更多</span>
-      </a>
+      </button>
     </nav>
 
     <!-- 移动端更多菜单 -->
     <div class="mobile-more-overlay" v-if="showMoreMenu" @click="showMoreMenu = false">
-      <div class="mobile-more-menu" @click.stop>
-        <router-link to="/teachers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          <span>教师管理</span>
-        </router-link>
-        <router-link to="/teacher-stats" class="more-item" @click="showMoreMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="20" x2="18" y2="10"/>
-            <line x1="12" y1="20" x2="12" y2="4"/>
-            <line x1="6" y1="20" x2="6" y2="14"/>
-          </svg>
-          <span>教师统计</span>
-        </router-link>
-        <router-link to="/calendar" class="more-item" @click="showMoreMenu = false">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-          </svg>
-          <span>日历</span>
-        </router-link>
-        <router-link to="/handovers" class="more-item" @click="showMoreMenu = false" v-if="isAdmin">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="8.5" cy="7" r="4"/>
-            <line x1="20" y1="8" x2="20" y2="14"/>
-            <line x1="23" y1="11" x2="17" y2="11"/>
-          </svg>
-          <span>交接记录</span>
-        </router-link>
-        <router-link to="/profile" class="more-item" @click="showMoreMenu = false" v-if="useApi && authUser">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
-          <span>个人资料</span>
-        </router-link>
+      <div id="mobile-more-actions" class="mobile-more-menu" @click.stop>
+        <AppNavLink v-for="item in moreNavItems" :key="item.to" :item="item" link-class="more-item" show-icon @select="showMoreMenu = false" />
+        <AppNavLink v-if="authUser" :item="accountNavItem" link-class="more-item" show-icon @select="showMoreMenu = false" />
+        <button v-if="isAdmin" type="button" class="more-item" @click="showMoreMenu = false; showBackupModal = true"><NavIcon name="backup" :size="18" /><span>数据备份与恢复</span></button>
+        <button v-if="authUser" type="button" class="more-item more-logout" @click="showMoreMenu = false; handleLogout()"><NavIcon name="logout" :size="18" /><span>退出登录</span></button>
       </div>
     </div>
 
     <Toast />
+    <OfficeModal :show="!!pendingImport" @update:show="value => { if (!value && !importing) pendingImport = null }"><div class="modal"><h2 class="modal-title">确认恢复备份</h2><p>{{ pendingImport?.name }}</p><p>恢复将覆盖当前业务数据和备份中包含的账号。请确认已保存当前备份。</p><div class="modal-actions"><OfficeButton :disabled="importing" @click="pendingImport = null">取消</OfficeButton><OfficeButton class="btn btn-primary" :disabled="importing" @click="confirmImport">{{ importing ? '正在恢复…' : '确认恢复' }}</OfficeButton></div></div></OfficeModal>
     <!-- 数据备份弹窗 -->
-    <div class="modal-overlay" v-if="showBackupModal" @click.self="showBackupModal = false">
+    <OfficeModal v-model:show="showBackupModal" @update:show="value => { if (!value) { showBackupModal = false } }">
       <div class="modal">
         <h2 class="modal-title">数据备份与恢复</h2>
-
-        <div class="store-info" v-if="isElectronEnv">
-          <div class="store-label">数据存储位置</div>
-          <div class="store-path">{{ storePath }}</div>
-        </div>
 
         <div class="backup-section">
           <h3>备份数据</h3>
           <p class="backup-desc">将当前所有数据导出为 SQL 文件，保存到本地</p>
-          <button class="btn btn-primary" @click="handleBackup">
+          <OfficeButton class="btn btn-primary" @click="handleBackup">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
             导出备份
-          </button>
+          </OfficeButton>
         </div>
         <div class="backup-divider"></div>
         <div class="backup-section">
@@ -218,35 +94,48 @@
           <p class="backup-desc">从 SQL 或 JSON 备份文件恢复数据，将覆盖当前所有数据</p>
           <div class="import-area">
             <input type="file" ref="fileInput" accept=".sql,.json" @change="handleImport" style="display: none" />
-            <button class="btn btn-secondary" @click="$refs.fileInput.click()">
+            <OfficeButton class="btn btn-secondary" @click="$refs.fileInput.click()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="17 8 12 3 7 8"/>
                 <line x1="12" y1="3" x2="12" y2="15"/>
               </svg>
               选择备份文件
-            </button>
+            </OfficeButton>
           </div>
           <p class="import-warning" v-if="importResult">
             <span :class="importResult.success ? 'success' : 'error'">{{ importResult.message }}</span>
           </p>
         </div>
         <div class="modal-actions">
-          <button class="btn btn-secondary" @click="showBackupModal = false">关闭</button>
+          <OfficeButton class="btn btn-secondary" @click="showBackupModal = false">关闭</OfficeButton>
         </div>
       </div>
-    </div>
+    </OfficeModal>
   </div>
+  </NConfigProvider>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import Toast from './components/Toast.vue'
-import { downloadBackup, importData, getStorePath, checkIsElectron } from './utils/storage'
+import BrandLogo from './components/BrandLogo.vue'
+import AppNavLink from './components/AppNavLink.vue'
+import NavIcon from './components/NavIcon.vue'
+import { NConfigProvider, zhCN, dateZhCN } from 'naive-ui'
+import { navigationItems } from './navigation.js'
+import { downloadBackup, importData } from './utils/storage'
 import { useToast } from './composables/useToast'
 
-const useApi = import.meta.env.VITE_USE_API === 'true'
+const themeOverrides = {
+  common: {
+    primaryColor: '#4178B9', primaryColorHover: '#31689F', primaryColorPressed: '#285A8C',
+    primaryColorSuppl: '#4178B9', textColorBase: '#26384D', textColor2: '#63758A',
+    borderColor: '#DBE5EF', bodyColor: '#F8FAFD', cardColor: '#FFFFFF',
+    borderRadius: '10px', fontFamily: "Inter, 'Microsoft YaHei', 'PingFang SC', sans-serif"
+  }
+}
 const router = useRouter()
 const toast = useToast()
 
@@ -285,91 +174,68 @@ onUnmounted(() => {
   clearTimeout(doneTimer)
 })
 
-const vClickOutside = {
-  mounted(el, binding) {
-    el._handler = (e) => {
-      if (!el.contains(e.target)) binding.value()
-    }
-    document.addEventListener('click', el._handler, true)
-  },
-  unmounted(el) {
-    document.removeEventListener('click', el._handler, true)
-  }
-}
-
 const showBackupModal = ref(false)
 const showMoreMenu = ref(false)
 const showNavMore = ref(false)
+const showAccountMenu = ref(false)
 const importResult = ref(null)
+const pendingImport = ref(null)
+const importing = ref(false)
 
 watch(() => router.currentRoute.value.path, () => {
   showMoreMenu.value = false
   showNavMore.value = false
+  showAccountMenu.value = false
 })
-const isElectronEnv = ref(false)
-const storePath = ref('')
 const appVersion = __APP_VERSION__
 
 const authUser = ref(null)
 
-const currentPageTitle = computed(() => {
-  const route = router.currentRoute.value
-  const titles = {
-    '/': '首页',
-    '/students': '学生管理',
-    '/teachers': '教师管理',
-    '/courses': '课程安排',
-    '/attendance': '点名',
-    '/calendar': '日历',
-    '/weekly-schedule': '周排课',
-    '/teacher-stats': '教师统计',
-    '/profile': '个人资料',
-    '/handovers': '交接记录',
-    '/login': '登录'
-  }
-  return titles[route.path] || '教务系统'
-})
-
 const isLoginPage = computed(() => router.currentRoute.value.path === '/login')
+const isAdmin = computed(() => authUser.value?.role === 'admin')
+const visibleNavItems = computed(() => navigationItems.filter(item => !item.adminOnly || isAdmin.value))
+const primaryNavItems = computed(() => visibleNavItems.value.filter(item => item.section === 'primary'))
+const moreNavItems = computed(() => visibleNavItems.value.filter(item => item.section === 'more'))
+const accountNavItem = navigationItems.find(item => item.section === 'account')
+const moreNavActive = computed(() => moreNavItems.value.some(item => item.to === router.currentRoute.value.path))
+const moreMobileActive = computed(() => moreNavActive.value || [accountNavItem.to, '/hours-history'].includes(router.currentRoute.value.path))
 
 onMounted(async () => {
-  isElectronEnv.value = checkIsElectron()
-  if (isElectronEnv.value) {
-    storePath.value = await getStorePath() || ''
-  }
-  if (useApi) {
-    const { useAuthStore } = await import('./stores/auth.js')
-    const authStore = useAuthStore()
+  const { useAuthStore } = await import('./stores/auth.js')
+  const authStore = useAuthStore()
+  authUser.value = authStore.user
+  authStore.$subscribe(() => {
     authUser.value = authStore.user
-    authStore.$subscribe(() => {
-      authUser.value = authStore.user
-    })
-  }
+  })
 })
 
 function closeDropdowns(e) {
   if (!e.target.closest('.nav-more')) showNavMore.value = false
+  if (!e.target.closest('.account-menu')) showAccountMenu.value = false
 }
-document.addEventListener('click', closeDropdowns)
-
-const isAdmin = computed(() => {
-  if (!useApi) return true
-  return authUser.value?.role === 'admin'
-})
+function closeMenusOnEscape(e) {
+  if (e.key !== 'Escape') return
+  showNavMore.value = false
+  showAccountMenu.value = false
+  showMoreMenu.value = false
+}
+onMounted(() => document.addEventListener('click', closeDropdowns))
+onUnmounted(() => document.removeEventListener('click', closeDropdowns))
+onMounted(() => document.addEventListener('keydown', closeMenusOnEscape))
+onUnmounted(() => document.removeEventListener('keydown', closeMenusOnEscape))
 
 const roleLabel = computed(() => {
   if (!authUser.value) return ''
   return authUser.value.role === 'admin' ? '管理员' : '教师'
 })
+const showRoleLabel = computed(() => !authUser.value?.displayName?.includes(roleLabel.value))
 
 function handleLogout() {
-  if (useApi) {
-    import('./stores/auth.js').then(({ useAuthStore }) => {
-      const authStore = useAuthStore()
-      authStore.logout()
-      router.push('/login')
-    })
-  }
+  import('./stores/auth.js').then(({ useAuthStore }) => {
+    const authStore = useAuthStore()
+    authStore.logout()
+    router.push('/login')
+  })
 }
 
 async function handleBackup() {
@@ -384,21 +250,27 @@ async function handleBackup() {
 async function handleImport(event) {
   const file = event.target.files[0]
   if (!file) return
-
-  const reader = new FileReader()
-  reader.onload = async (e) => {
-    const result = await importData(e.target.result)
-    importResult.value = result
-
-    if (result.success) {
-      setTimeout(() => {
-        window.location.reload()
-      }, 1500)
-    }
+  importResult.value = null
+  pendingImport.value = null
+  try {
+    pendingImport.value = { name: file.name, content: await file.text() }
+  } catch {
+    importResult.value = { success: false, message: '备份文件读取失败，请重新选择' }
+  } finally {
+    event.target.value = ''
   }
-  reader.readAsText(file)
-  event.target.value = ''
 }
+async function confirmImport() {
+  if (importing.value || !pendingImport.value) return
+  importing.value = true
+  try {
+    const result = await importData(pendingImport.value.content)
+    importResult.value = result
+    if (result.success) { pendingImport.value = null; setTimeout(() => window.location.reload(), 1500) }
+    else toast.error(result.message)
+  } finally { importing.value = false }
+}
+
 </script>
 
 <style scoped>
@@ -459,7 +331,7 @@ async function handleImport(event) {
 
 /* ===== 桌面端顶部导航 ===== */
 .desktop-nav {
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.96);
   backdrop-filter: saturate(180%) blur(20px);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
@@ -469,7 +341,7 @@ async function handleImport(event) {
 }
 
 .header-content {
-  max-width: 1200px;
+  max-width: 1320px;
   margin: 0 auto;
   padding: 0 24px;
   height: 64px;
@@ -483,31 +355,25 @@ async function handleImport(event) {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: none;
 }
 
 .logo-text {
   font-size: 18px;
   font-weight: 600;
   color: var(--color-text);
-}
-
-.version {
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--color-text-secondary);
-  margin-left: 4px;
-  vertical-align: middle;
+  white-space: nowrap;
 }
 
 .nav {
   display: flex;
-  gap: 8px;
+  gap: 4px;
   flex-wrap: nowrap;
   overflow: visible;
 }
 
 .nav-item {
-  padding: 8px 16px;
+  padding: 8px 12px;
   color: var(--color-text-secondary);
   text-decoration: none;
   font-size: 14px;
@@ -524,8 +390,8 @@ async function handleImport(event) {
 }
 
 .nav-item.active {
-  color: var(--color-primary);
-  background: rgba(0, 113, 227, 0.1);
+  color: var(--color-primary-text);
+  background: var(--color-selected);
 }
 
 .nav-more {
@@ -574,108 +440,21 @@ async function handleImport(event) {
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex: none;
 }
 
-.user-info {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  text-decoration: none;
-  cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--radius-sm);
-  transition: var(--transition);
-}
-
-.user-info:hover {
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
-}
-
-.user-role {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 500;
-}
-
-.user-role.admin {
-  background: rgba(0, 113, 227, 0.1);
-  color: var(--color-primary);
-}
-
-.user-role.teacher {
-  background: rgba(52, 199, 89, 0.1);
-  color: var(--color-success);
-}
-
-.btn-sm {
-  padding: 6px 12px;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* ===== 移动端顶部栏（默认隐藏）===== */
-.mobile-header {
-  display: none;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: 1px solid var(--color-border);
-}
-
-.mobile-header-content {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  height: 48px;
-}
-
-.mobile-logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.mobile-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.mobile-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.mobile-icon-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  text-decoration: none;
-  transition: var(--transition);
-  -webkit-tap-highlight-color: transparent;
-}
-
-.mobile-icon-btn:active {
-  background: var(--color-bg-secondary);
-}
+.account-menu { position: relative; }
+.account-trigger { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: white; color: var(--color-text-secondary); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.account-trigger:hover, .account-trigger[aria-expanded="true"] { background: var(--color-bg-secondary); color: var(--color-text); }
+.account-trigger:focus-visible, .nav-more-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.account-dropdown { position: absolute; top: calc(100% + 7px); right: 0; z-index: 200; min-width: 188px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: white; box-shadow: var(--shadow-lg); }
+.account-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 13px 15px; border-bottom: 1px solid var(--color-border); color: var(--color-text); font-size: 13px; }
+.account-summary strong { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-summary span { flex: none; color: var(--color-text-secondary); font-size: 11px; }
+.account-action { display: block; width: 100%; padding: 10px 15px; border: 0; background: white; color: var(--color-text); text-align: left; text-decoration: none; font: inherit; font-size: 13px; cursor: pointer; }
+.account-action:hover, .account-action:focus-visible { background: var(--color-bg-secondary); }
+.account-logout { border-top: 1px solid var(--color-border); }
+.account-version { padding: 4px 15px 10px; color: var(--color-text-secondary); font-size: 11px; }
 
 /* ===== 移动端底部 Tab 栏（默认隐藏）===== */
 .mobile-tab-bar {
@@ -709,14 +488,18 @@ async function handleImport(event) {
   white-space: nowrap;
   min-width: 0;
   overflow: hidden;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .tab-item:active {
-  color: var(--color-primary);
+  color: var(--color-primary-text);
 }
 
 .tab-active {
-  color: var(--color-primary) !important;
+  color: var(--color-primary-text) !important;
 }
 
 /* ===== 移动端更多菜单 ===== */
@@ -737,6 +520,9 @@ async function handleImport(event) {
   -webkit-tap-highlight-color: transparent;
 }
 
+button.more-item { width: 100%; border: 0; background: white; text-align: left; font-family: inherit; cursor: pointer; }
+.more-logout { border-top: 1px solid var(--color-border) !important; }
+
 .more-item:active {
   background: var(--color-bg-secondary);
 }
@@ -746,16 +532,6 @@ async function handleImport(event) {
   max-width: 1200px;
   margin: 0 auto;
   padding: 32px 24px;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
 }
 
 /* ===== 弹窗 ===== */
@@ -787,26 +563,6 @@ async function handleImport(event) {
   font-size: 20px;
   font-weight: 600;
   margin-bottom: 20px;
-}
-
-.store-info {
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  margin-bottom: 20px;
-}
-
-.store-label {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  margin-bottom: 8px;
-}
-
-.store-path {
-  font-size: 13px;
-  color: var(--color-text);
-  font-family: monospace;
-  word-break: break-all;
 }
 
 .backup-section {
@@ -856,11 +612,6 @@ async function handleImport(event) {
   margin-top: 20px;
 }
 
-/* Electron 环境：为红绿灯按钮留出空间 */
-.header-electron .header-content {
-  padding-left: 78px;
-}
-
 /* ===== 平板/移动端适配 ===== */
 @media (max-width: 1100px) {
   .nav-item {
@@ -870,28 +621,29 @@ async function handleImport(event) {
   .logo-text {
     font-size: 15px;
   }
-  .header-actions .btn-sm span {
-    display: none;
-  }
-  .header-actions .btn-sm {
-    padding: 8px;
-  }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1240px) {
   .header-content {
     padding: 0 16px;
   }
 }
 
-/* ===== 移动端/平板：切换为底部 Tab 导航 ===== */
-@media (max-width: 1024px) {
+@media (min-width: 600px) and (max-width: 1240px) {
+  .header-content { min-height: 56px; height: auto; column-gap: 16px; }
+  .logo, .header-actions { min-height: 56px; }
+  .main { padding: 24px 20px; }
+}
+
+@media (min-width: 600px) and (max-width: 699px) {
+  .header-content { flex-wrap: wrap; }
+  .nav { order: 3; width: 100%; justify-content: center; padding-bottom: 10px; }
+}
+
+/* ===== 手机底部导航 ===== */
+@media (max-width: 599px) {
   .desktop-nav {
     display: none;
-  }
-
-  .mobile-header {
-    display: block;
   }
 
   .mobile-tab-bar {
@@ -899,15 +651,19 @@ async function handleImport(event) {
   }
 
   .mobile-more-overlay {
-    display: block;
+    display: flex;
     position: fixed;
-    bottom: 56px;
-    left: 8px;
-    right: 8px;
-    z-index: 250;
+    inset: 0;
+    align-items: flex-end;
+    z-index: 190;
+    padding: 0 8px calc(60px + env(safe-area-inset-bottom, 0px));
+    background: rgba(38, 56, 77, .22);
   }
 
   .mobile-more-menu {
+    width: 100%;
+    max-height: calc(100dvh - 120px);
+    overflow-y: auto;
     background: white;
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
@@ -928,6 +684,7 @@ async function handleImport(event) {
 
   .main {
     padding: 16px 12px;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
     padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -936,4 +693,5 @@ async function handleImport(event) {
     border-radius: var(--radius-md);
   }
 }
+.main.main-login { max-width: none; width: 100%; padding: 0; margin: 0; }
 </style>

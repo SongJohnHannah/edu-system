@@ -1,15 +1,72 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
 import { formatDateTime } from '../utils/dateFormat.js'
+import { acquireScheduleLock, releaseScheduleLock, closeScheduleConnection, futureTrialWindow } from './scheduleService.js'
+
+async function acquireStudentIdentityLock(conn) {
+  const [rows] = await conn.execute("SELECT GET_LOCK('edu-system-student-identity', 5) AS acquired")
+  if (rows[0]?.acquired !== 1) throw Object.assign(new Error('学生资料正由其他人录入，请稍后重试'), { status: 409 })
+}
+
+async function releaseStudentIdentityLock(conn) {
+  await conn.execute("SELECT RELEASE_LOCK('edu-system-student-identity')")
+}
+
+async function closeStudentWriteConnection(conn, identityLocked, scheduleLocked = false) {
+  let discard = false
+  try { if (identityLocked) await releaseStudentIdentityLock(conn) } catch { discard = true }
+  try { if (scheduleLocked) await releaseScheduleLock(conn) } catch { discard = true }
+  if (discard) {
+    try { conn.destroy() } catch { /* The connection is already unusable. */ }
+  } else {
+    try { conn.release() } catch { try { conn.destroy() } catch { /* The connection is already unusable. */ } }
+  }
+}
+
+function initialHours(value) {
+  const hours = Number(value ?? 0)
+  if (!Number.isFinite(hours) || hours < 0 || hours > 10000 || !Number.isInteger(hours * 2)) {
+    throw Object.assign(new Error('初始课时须为 0 至 10000 之间的半课时倍数'), { status: 400 })
+  }
+  return hours
+}
+
+function initialEnrollmentStage(value) {
+  if (value === undefined) return 'enrolled'
+  if (value !== 'pending' && value !== 'enrolled') {
+    throw Object.assign(new Error('报名阶段须为待报名或已报名'), { status: 400 })
+  }
+  return value
+}
+
+function normalizedPhone(value) {
+  return String(value ?? '').trim()
+}
+
+function assertStudentFieldLengths(name, phone) {
+  if ([...name].length > 100) throw Object.assign(new Error('学生姓名不能超过100个字符'), { status: 400 })
+  if ([...phone].length > 20) throw Object.assign(new Error('联系电话不能超过20个字符'), { status: 400 })
+}
+
+function normalizedAge(value) {
+  if (value === null || value === undefined || value === '') return null
+  const age = Number(value)
+  if (!Number.isInteger(age) || age < 1 || age > 100) {
+    throw Object.assign(new Error('年龄须为1至100的整数'), { status: 400 })
+  }
+  return age
+}
 
 function formatStudent(row) {
+  const student = { ...row }
+  delete student.class_id
   return {
-    ...row,
+    ...student,
     totalHours: Number(row.total_hours),
     usedHours: Number(row.used_hours),
-    classId: row.class_id,
     createdBy: row.created_by,
     creatorId: row.creator_id,
+    enrollmentStage: row.enrollment_stage,
     isTest: !!row.is_test,
     createdAt: formatDateTime(row.created_at),
     updatedAt: formatDateTime(row.updated_at)
@@ -17,30 +74,7 @@ function formatStudent(row) {
 }
 
 export async function getAll(teacherScope) {
-  if (!teacherScope) {
-    const [rows] = await pool.execute('SELECT * FROM students ORDER BY created_at DESC')
-    return rows.map(formatStudent)
-  }
-  // 教师可见学生：自己创建的 + 自己课程中的 + 管理员创建且未被其他老师占用的
-  const [rows] = await pool.execute(`
-    SELECT DISTINCT s.* FROM students s
-    WHERE
-      s.creator_id = ?
-      OR EXISTS (
-        SELECT 1 FROM courses c
-        WHERE JSON_CONTAINS(c.student_ids, JSON_QUOTE(s.id))
-        AND c.teacher_id = ?
-      )
-      OR (
-        s.created_by = 'admin'
-        AND NOT EXISTS (
-          SELECT 1 FROM courses c2
-          WHERE JSON_CONTAINS(c2.student_ids, JSON_QUOTE(s.id))
-          AND c2.teacher_id != ?
-        )
-      )
-    ORDER BY s.created_at DESC
-  `, [teacherScope, teacherScope, teacherScope])
+  const [rows] = await pool.execute('SELECT * FROM students ORDER BY created_at DESC')
   return rows.map(formatStudent)
 }
 
@@ -50,256 +84,307 @@ export async function getById(id) {
 }
 
 export async function verifyAccess(id, teacherScope) {
+  const [rows] = await pool.execute('SELECT created_by, creator_id, status FROM students WHERE id = ?', [id])
+  assertWriteAccess(rows[0], teacherScope)
+  return true
+}
+
+function assertWriteAccess(student, teacherScope) {
+  if (!student || student.status === 'deleted') throw Object.assign(new Error('学生不存在'), { status: 404 })
+  if (teacherScope && student.created_by !== 'admin' && student.creator_id !== teacherScope) {
+    throw Object.assign(new Error('只能修改自己或管理员录入的学生'), { status: 403 })
+  }
+}
+
+export async function verifyDeleteAccess(id, teacherScope) {
+  await verifyAccess(id, teacherScope)
   if (!teacherScope) return true
-  const [rows] = await pool.execute(`
-    SELECT 1 FROM students s
-    WHERE s.id = ? AND (
-      s.creator_id = ?
-      OR EXISTS (
-        SELECT 1 FROM courses c
-        WHERE JSON_CONTAINS(c.student_ids, JSON_QUOTE(s.id))
-        AND c.teacher_id = ?
-      )
-      OR (
-        s.created_by = 'admin'
-        AND NOT EXISTS (
-          SELECT 1 FROM courses c2
-          WHERE JSON_CONTAINS(c2.student_ids, JSON_QUOTE(s.id))
-          AND c2.teacher_id != ?
-        )
-      )
-    )
-    LIMIT 1
-  `, [id, teacherScope, teacherScope, teacherScope])
-  if (rows.length === 0) throw new Error('无权访问该学生数据')
+  const [rows] = await pool.execute('SELECT creator_id FROM students WHERE id = ?', [id])
+  if (rows[0].creator_id !== teacherScope) {
+    throw Object.assign(new Error('只能归档自己录入的学生'), { status: 403 })
+  }
   return true
 }
 
 export async function create(data) {
+  if (!data || typeof data !== 'object') throw Object.assign(new Error('学生资料无效'), { status: 400 })
+  const name = String(data.name ?? '').trim()
+  if (!name) throw Object.assign(new Error('请输入学生姓名'), { status: 400 })
+  const phone = normalizedPhone(data.phone)
+  assertStudentFieldLengths(name, phone)
+  const age = normalizedAge(data.age)
+  const totalHours = initialHours(data.totalHours)
+  const enrollmentStage = initialEnrollmentStage(data.enrollmentStage)
   const conn = await pool.getConnection()
+  let identityLocked = false
   try {
+    await acquireStudentIdentityLock(conn)
+    identityLocked = true
     await conn.beginTransaction()
-    const [dup] = await conn.execute('SELECT id FROM students WHERE name = ? FOR UPDATE', [data.name])
-    if (dup.length > 0) throw new Error('学生姓名已存在')
+    const [dup] = await conn.execute('SELECT id FROM students WHERE TRIM(name) = ? FOR UPDATE', [name])
+    if (dup.length > 0) throw Object.assign(new Error('学生姓名已存在'), { status: 409 })
 
-    if (data.phone) {
-      const [phoneDup] = await conn.execute('SELECT id FROM students WHERE phone = ? AND phone != "" FOR UPDATE', [data.phone])
-      if (phoneDup.length > 0) throw new Error('该手机号已被其他学生使用')
+    if (phone) {
+      const [phoneDup] = await conn.execute('SELECT id FROM students WHERE TRIM(phone) = ? AND phone != "" FOR UPDATE', [phone])
+      if (phoneDup.length > 0) throw Object.assign(new Error('该手机号已被其他学生使用'), { status: 409 })
     }
 
     const id = generateId()
     await conn.execute(
-      `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
+      `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, created_by, creator_id, is_test, enrollment_stage)
        VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
-      [id, data.name, data.phone || '', data.age || null, data.remark || '', data.totalHours || 0, data.classId || '',
-       data.createdBy || 'admin', data.creatorId || null, data.isTest ? 1 : 0]
+      [id, name, phone, age, data.remark || '', totalHours,
+       data.createdBy || 'admin', data.creatorId || null, data.isTest ? 1 : 0, enrollmentStage]
     )
+    const [rows] = await conn.execute('SELECT * FROM students WHERE id = ?', [id])
+    const result = formatStudent(rows[0])
     await conn.commit()
-    const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-    return formatStudent(rows[0])
+    return result
   } catch (err) {
     await conn.rollback()
     throw err
   } finally {
-    conn.release()
+    await closeStudentWriteConnection(conn, identityLocked)
   }
 }
 
 export async function update(id, data) {
-  const [existing] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-  if (existing.length === 0) throw new Error('学生不存在')
+  const conn = await pool.getConnection()
+  let locked = false
+  let identityLocked = false
+  try {
+    await acquireScheduleLock(conn)
+    locked = true
+    await acquireStudentIdentityLock(conn)
+    identityLocked = true
+    await conn.beginTransaction()
+    const [existing] = await conn.execute('SELECT * FROM students WHERE id = ? FOR UPDATE', [id])
+    if (!existing.length || existing[0].status === 'deleted') throw Object.assign(new Error('学生不存在'), { status: 404 })
+    const s = existing[0]
+    const name = String(data.name ?? s.name).trim()
+    const phone = data.phone === undefined ? s.phone : normalizedPhone(data.phone)
+    if (!name) throw Object.assign(new Error('请输入学生姓名'), { status: 400 })
+    assertStudentFieldLengths(name, phone)
+    const age = data.age === undefined ? s.age : normalizedAge(data.age)
+    if (data.status !== undefined && !['active', 'quit'].includes(data.status)) {
+      throw Object.assign(new Error('无效的学生状态'), { status: 400 })
+    }
+    if (data.enrollmentStage !== undefined && !['pending', 'enrolled'].includes(data.enrollmentStage)) {
+      throw Object.assign(new Error('无效的报名阶段'), { status: 400 })
+    }
+    if ((data.totalHours !== undefined && Number(data.totalHours) !== Number(s.total_hours)) ||
+        (data.usedHours !== undefined && Number(data.usedHours) !== Number(s.used_hours))) {
+      throw Object.assign(new Error('课时变更请使用加减课时操作'), { status: 400 })
+    }
 
-  if (data.name) {
-    const [dup] = await pool.execute('SELECT id FROM students WHERE name = ? AND id != ?', [data.name, id])
-    if (dup.length > 0) throw new Error('学生姓名已存在')
+    const [dup] = await conn.execute('SELECT id FROM students WHERE TRIM(name) = ? AND id != ?', [name, id])
+    if (dup.length) throw Object.assign(new Error('学生姓名已存在'), { status: 409 })
+    if (data.phone !== undefined && phone) {
+      const [phoneDup] = await conn.execute('SELECT id FROM students WHERE TRIM(phone) = ? AND id != ? AND phone != ""', [phone, id])
+      if (phoneDup.length) throw Object.assign(new Error('该手机号已被其他学生使用'), { status: 409 })
+    }
+
+    const nextStage = data.enrollmentStage ?? s.enrollment_stage
+    if (nextStage !== s.enrollment_stage) {
+      if (nextStage === 'pending') {
+        const [courses] = await conn.execute(
+          'SELECT id FROM courses WHERE archived_at IS NULL AND JSON_CONTAINS(student_ids, JSON_QUOTE(?)) LIMIT 1', [id])
+        if (courses.length) throw Object.assign(new Error('请先从正式课程名单移除该学生，再改为待报名'), { status: 409 })
+      } else {
+        const future = futureTrialWindow()
+        const [bookings] = await conn.execute(
+          `SELECT id FROM trial_bookings WHERE student_id = ? AND status = 'active' AND ${future.clause} LIMIT 1`,
+          [id, ...future.params])
+        if (bookings.length) throw Object.assign(new Error('请先处理该学生未来的试听预约，再改为已报名'), { status: 409 })
+      }
+    }
+    if (data.status === 'quit' && s.status !== 'quit') {
+      const [courses] = await conn.execute(
+        'SELECT id FROM courses WHERE archived_at IS NULL AND JSON_CONTAINS(student_ids, JSON_QUOTE(?)) LIMIT 1', [id])
+      if (courses.length) throw Object.assign(new Error('请先从正式课程名单移除该学生，再办理退学'), { status: 409 })
+      const future = futureTrialWindow()
+      const [bookings] = await conn.execute(
+        `SELECT id FROM trial_bookings WHERE student_id = ? AND status = 'active' AND ${future.clause} LIMIT 1`,
+        [id, ...future.params])
+      if (bookings.length) throw Object.assign(new Error('请先处理该学生未来的试听预约，再办理退学'), { status: 409 })
+    }
+
+    await conn.execute(
+      'UPDATE students SET name = ?, phone = ?, age = ?, remark = ?, status = ?, enrollment_stage = ? WHERE id = ?',
+      [name, phone, age,
+        data.remark !== undefined ? data.remark : s.remark, data.status ?? s.status,
+        nextStage, id]
+    )
+    const [rows] = await conn.execute('SELECT * FROM students WHERE id = ?', [id])
+    const result = formatStudent(rows[0])
+    await conn.commit()
+    return result
+  } catch (error) {
+    await conn.rollback()
+    throw error
+  } finally {
+    await closeStudentWriteConnection(conn, identityLocked, locked)
   }
-
-  if (data.phone) {
-    const [phoneDup] = await pool.execute('SELECT id FROM students WHERE phone = ? AND id != ? AND phone != ""', [data.phone, id])
-    if (phoneDup.length > 0) throw new Error('该手机号已被其他学生使用')
-  }
-
-  const s = existing[0]
-  await pool.execute(
-    `UPDATE students SET name = ?, phone = ?, age = ?, remark = ?, total_hours = ?,
-     used_hours = ?, status = ?, class_id = ? WHERE id = ?`,
-    [
-      data.name ?? s.name,
-      data.phone !== undefined ? data.phone : s.phone,
-      data.age !== undefined ? data.age : s.age,
-      data.remark !== undefined ? data.remark : s.remark,
-      data.totalHours !== undefined ? data.totalHours : s.total_hours,
-      data.usedHours !== undefined ? data.usedHours : s.used_hours,
-      data.status ?? s.status,
-      data.classId !== undefined ? data.classId : s.class_id,
-      id
-    ]
-  )
-  const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-  return formatStudent(rows[0])
 }
 
 export async function remove(id) {
   const conn = await pool.getConnection()
+  let locked = false
   try {
+    await acquireScheduleLock(conn)
+    locked = true
     await conn.beginTransaction()
-    await conn.execute('DELETE FROM hour_records WHERE student_id = ?', [id])
-    const [records] = await conn.execute('SELECT id, student_ids FROM attendance WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
-    for (const r of records) {
-      const ids = typeof r.student_ids === 'string' ? JSON.parse(r.student_ids) : (r.student_ids || [])
-      const remaining = ids.filter(sid => sid !== id)
-      if (remaining.length === 0) {
-        await conn.execute('DELETE FROM attendance WHERE id = ?', [r.id])
-      } else {
-        await conn.execute('UPDATE attendance SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), r.id])
-      }
-    }
-    const [courses] = await conn.execute('SELECT id, student_ids FROM courses WHERE JSON_CONTAINS(student_ids, JSON_QUOTE(?))', [id])
-    for (const c of courses) {
-      const ids = typeof c.student_ids === 'string' ? JSON.parse(c.student_ids) : (c.student_ids || [])
-      const remaining = ids.filter(sid => sid !== id)
-      await conn.execute('UPDATE courses SET student_ids = ? WHERE id = ?', [JSON.stringify(remaining), c.id])
-    }
-    await conn.execute('DELETE FROM students WHERE id = ?', [id])
+    const future = futureTrialWindow()
+    const [bookings] = await conn.execute(
+      `SELECT id FROM trial_bookings WHERE student_id = ? AND status = 'active' AND ${future.clause} LIMIT 1`,
+      [id, ...future.params])
+    if (bookings.length) throw Object.assign(new Error('请先处理该学生未来的试听预约'), { status: 409 })
+    const [courses] = await conn.execute("SELECT id FROM courses WHERE archived_at IS NULL AND JSON_CONTAINS(student_ids, JSON_QUOTE(?)) LIMIT 1", [id])
+    if (courses.length) throw Object.assign(new Error('请先从正式课程名单移除该学生'), { status: 409 })
+    await conn.execute("UPDATE students SET status = 'deleted' WHERE id = ?", [id])
     await conn.commit()
-  } catch (err) {
+  } catch (error) {
     await conn.rollback()
-    throw err
+    throw error
   } finally {
-    conn.release()
+    await closeScheduleConnection(conn, locked)
   }
 }
 
 export async function checkNameExists(name, excludeId) {
+  name = String(name ?? '').trim()
+  if (!name) return false
   if (excludeId) {
-    const [rows] = await pool.execute('SELECT id FROM students WHERE name = ? AND id != ?', [name, excludeId])
+    const [rows] = await pool.execute('SELECT id FROM students WHERE TRIM(name) = ? AND id != ?', [name, excludeId])
     return rows.length > 0
   }
-  const [rows] = await pool.execute('SELECT id FROM students WHERE name = ?', [name])
+  const [rows] = await pool.execute('SELECT id FROM students WHERE TRIM(name) = ?', [name])
   return rows.length > 0
 }
 
 export async function updateStatus(id, status) {
-  await pool.execute('UPDATE students SET status = ? WHERE id = ?', [status, id])
-  const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-  return rows[0] ? formatStudent(rows[0]) : null
+  return update(id, { status })
 }
 
-export async function addHours(id, hours, remark, operator) {
+function validateManualHours(value) {
+  const hours = Number(value)
+  if (!Number.isFinite(hours) || hours < 0.5 || hours > 10000 || !Number.isInteger(hours * 2)) {
+    throw Object.assign(new Error('课时数须为 0.5 至 10000 之间的半课时倍数'), { status: 400 })
+  }
+  return hours
+}
+
+export async function addHours(id, hours, remark, operator, teacherScope = null) {
+  hours = validateManualHours(hours)
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
+    const [students] = await conn.execute('SELECT created_by, creator_id, status FROM students WHERE id = ? FOR UPDATE', [id])
+    assertWriteAccess(students[0], teacherScope)
     await conn.execute('UPDATE students SET total_hours = total_hours + ? WHERE id = ?', [hours, id])
     const recordId = generateId()
     await conn.execute(
-      'INSERT INTO hour_records (id, student_id, type, hours, remark, operator) VALUES (?, ?, ?, ?, ?, ?)',
-      [recordId, id, 'add', hours, remark || '手动添加', operator || 'manual']
+      'INSERT INTO hour_records (id, student_id, type, hours, remark, operator, is_test) VALUES (?, ?, ?, ?, ?, ?, (SELECT is_test FROM students WHERE id = ?))',
+      [recordId, id, 'add', hours, remark || '手动添加', operator || 'manual', id]
     )
+    const [rows] = await conn.execute('SELECT * FROM students WHERE id = ?', [id])
+    const result = rows[0] ? formatStudent(rows[0]) : null
     await conn.commit()
+    return result
   } catch (err) {
     await conn.rollback()
     throw err
   } finally {
     conn.release()
   }
-  const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-  return rows[0] ? formatStudent(rows[0]) : null
 }
 
-export async function subtractHours(id, hours, remark, operator) {
+export async function subtractHours(id, hours, remark, operator, teacherScope = null) {
+  hours = validateManualHours(hours)
   const conn = await pool.getConnection()
   try {
     await conn.beginTransaction()
-    const [students] = await conn.execute('SELECT * FROM students WHERE id = ? FOR UPDATE', [id])
-    if (students.length === 0) throw new Error('学生不存在')
-    const student = students[0]
+    const [students] = await conn.execute('SELECT created_by, creator_id, status FROM students WHERE id = ? FOR UPDATE', [id])
+    assertWriteAccess(students[0], teacherScope)
     await conn.execute('UPDATE students SET total_hours = total_hours - ? WHERE id = ?', [hours, id])
     const recordId = generateId()
     await conn.execute(
-      'INSERT INTO hour_records (id, student_id, type, hours, remark, operator) VALUES (?, ?, ?, ?, ?, ?)',
-      [recordId, id, 'subtract', hours, remark || '手动减少', operator || 'manual']
+      'INSERT INTO hour_records (id, student_id, type, hours, remark, operator, is_test) VALUES (?, ?, ?, ?, ?, ?, (SELECT is_test FROM students WHERE id = ?))',
+      [recordId, id, 'subtract', hours, remark || '手动减少', operator || 'manual', id]
     )
+    const [rows] = await conn.execute('SELECT * FROM students WHERE id = ?', [id])
+    const result = rows[0] ? formatStudent(rows[0]) : null
     await conn.commit()
+    return result
   } catch (err) {
     await conn.rollback()
     throw err
   } finally {
     conn.release()
   }
-  const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id])
-  return rows[0] ? formatStudent(rows[0]) : null
 }
 
 export async function addBatch(studentList, defaultHours, createdBy = 'admin', creatorId = null) {
+  if (!Array.isArray(studentList) || !studentList.length || studentList.some(student => !student || typeof student !== 'object')) {
+    throw Object.assign(new Error('请提供有效的学生列表'), { status: 400 })
+  }
+  const normalizedDefaultHours = initialHours(defaultHours)
+  const prepared = studentList.map(student => ({
+    ...student,
+    name: String(student.name ?? '').trim(),
+    phone: normalizedPhone(student.phone),
+    totalHours: initialHours(student.totalHours ?? normalizedDefaultHours),
+    enrollmentStage: initialEnrollmentStage(student.enrollmentStage)
+  })).filter(student => student.name)
+  if (!prepared.length) throw Object.assign(new Error('请至少填写一个学生姓名'), { status: 400 })
+  for (const student of prepared) {
+    assertStudentFieldLengths(student.name, student.phone)
+    student.age = normalizedAge(student.age)
+  }
   const conn = await pool.getConnection()
+  let identityLocked = false
   let addedCount = 0
   const skipped = []
   try {
+    await acquireStudentIdentityLock(conn)
+    identityLocked = true
     await conn.beginTransaction()
-    for (const student of studentList) {
-      if (student.name && student.name.trim()) {
-        const name = student.name.trim()
-        const [dup] = await conn.execute('SELECT id FROM students WHERE name = ?', [name])
-        if (dup.length > 0) {
+    for (const student of prepared) {
+      const name = student.name
+      const [dup] = await conn.execute('SELECT id FROM students WHERE TRIM(name) = ?', [name])
+      if (dup.length > 0) {
+        skipped.push(name)
+        continue
+      }
+      if (student.phone) {
+        const [phoneDup] = await conn.execute('SELECT id FROM students WHERE TRIM(phone) = ? AND phone != ""', [student.phone])
+        if (phoneDup.length > 0) {
           skipped.push(name)
           continue
         }
-        if (student.phone) {
-          const [phoneDup] = await conn.execute('SELECT id FROM students WHERE phone = ? AND phone != ""', [student.phone])
-          if (phoneDup.length > 0) {
-            skipped.push(name)
-            continue
-          }
-        }
-        const id = generateId()
-        await conn.execute(
-          `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, class_id, created_by, creator_id, is_test)
-           VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
-          [id, name, '', student.age || null, '', student.totalHours || defaultHours || 0, student.classId || '',
-           createdBy, creatorId, student.isTest ? 1 : 0]
-        )
-        addedCount++
       }
+      const id = generateId()
+      await conn.execute(
+        `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, created_by, creator_id, is_test, enrollment_stage)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
+        [id, name, student.phone || '', student.age ?? null, student.remark || '', student.totalHours,
+         createdBy, creatorId, student.isTest ? 1 : 0, student.enrollmentStage]
+      )
+      addedCount++
     }
     await conn.commit()
   } catch (err) {
     await conn.rollback()
     throw err
   } finally {
-    conn.release()
+    await closeStudentWriteConnection(conn, identityLocked)
   }
   return { addedCount, skipped }
 }
 
-// 验证教师能否将这些学生加入课程（管理员创建的学生若已被其他老师选入则不可再选）
 export async function validateStudentsForCourse(studentIds, teacherScope, excludeCourseId = null) {
-  if (!teacherScope || !studentIds || studentIds.length === 0) return
-
-  for (const studentId of studentIds) {
-    const [rows] = await pool.execute(
-      'SELECT created_by FROM students WHERE id = ?', [studentId]
-    )
-    if (rows.length === 0 || rows[0].created_by !== 'admin') continue
-
-    let query = `
-      SELECT c.teacher_id, t.name as teacher_name FROM courses c
-      LEFT JOIN teachers t ON c.teacher_id = t.id
-      WHERE JSON_CONTAINS(c.student_ids, JSON_QUOTE(?))
-      AND c.teacher_id != ?
-    `
-    const params = [studentId, teacherScope]
-
-    if (excludeCourseId) {
-      query += ' AND c.id != ?'
-      params.push(excludeCourseId)
-    }
-
-    const [courses] = await pool.execute(query, params)
-    if (courses.length > 0) {
-      const teacherName = courses[0].teacher_name || '其他教师'
-      const [studentRows] = await pool.execute('SELECT name FROM students WHERE id = ?', [studentId])
-      const studentName = studentRows[0]?.name || '该学生'
-      throw new Error(`${studentName} 已被${teacherName}选入班级，无法重复选择`)
-    }
-  }
+  if (!Array.isArray(studentIds) || !studentIds.length) return
+  const unique = [...new Set(studentIds)]
+  const [rows] = await pool.query('SELECT id FROM students WHERE id IN (?) AND status != ?', [unique, 'deleted'])
+  if (rows.length !== unique.length) throw Object.assign(new Error('课程名单包含不存在或已归档的学生'), { status: 400 })
 }

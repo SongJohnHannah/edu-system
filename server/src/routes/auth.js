@@ -45,10 +45,7 @@ router.get('/profile', verifyToken, async (req, res, next) => {
 router.put('/profile', verifyToken, async (req, res, next) => {
   try {
     const { displayName } = req.body
-    await authService.updateProfile(req.user.id, { displayName })
-
-    // 返回更新后的 profile
-    const profile = await authService.getUserProfile(req.user.id)
+    const profile = await authService.updateProfile(req.user.id, { displayName })
     res.json(profile)
   } catch (err) {
     next(err)
@@ -90,9 +87,7 @@ router.put('/users/:id/password', verifyToken, requireAdmin, async (req, res, ne
 router.put('/users/:id', verifyToken, requireAdmin, async (req, res, next) => {
   try {
     const { displayName, phone } = req.body
-    await authService.updateUserByAdmin(req.params.id, { displayName, phone })
-
-    const profile = await authService.getUserProfile(req.params.id)
+    const profile = await authService.updateUserByAdmin(req.params.id, { displayName, phone }, { teacherOnly: true })
     res.json(profile)
   } catch (err) {
     next(err)

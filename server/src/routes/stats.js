@@ -10,14 +10,14 @@ router.get('/teachers', filterByTeacher, async (req, res, next) => {
     if (!start || !end) {
       return res.status(400).json({ error: '请提供 start 和 end 日期参数' })
     }
-    const stats = await statsService.getTeacherStats(start, end, req.teacherScope)
+    const stats = await statsService.getTeacherStats(start, end, req.query.scope === 'mine' ? req.teacherScope : null)
     res.json(stats)
   } catch (err) { next(err) }
 })
 
 router.get('/weekday-distribution', filterByTeacher, async (req, res, next) => {
   try {
-    const distribution = await statsService.getWeekdayDistribution(req.teacherScope)
+    const distribution = await statsService.getWeekdayDistribution(req.query.scope === 'mine' ? req.teacherScope : null, req.query.start, req.query.end)
     res.json(distribution)
   } catch (err) { next(err) }
 })
@@ -28,7 +28,7 @@ router.get('/overall', filterByTeacher, async (req, res, next) => {
     if (!start || !end) {
       return res.status(400).json({ error: '请提供 start 和 end 日期参数' })
     }
-    const stats = await statsService.getOverallStats(start, end, req.teacherScope)
+    const stats = await statsService.getOverallStats(start, end, req.query.scope === 'mine' ? req.teacherScope : null)
     res.json(stats)
   } catch (err) { next(err) }
 })

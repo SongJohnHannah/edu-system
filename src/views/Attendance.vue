@@ -7,42 +7,39 @@
       </div>
     </div>
 
-    <div class="tip" v-if="courses.length === 0">
+    <div class="select-course" v-if="!dataLoading && !dataError">
+      <label>选择日期与课程</label>
+      <div class="course-picker">
+        <OfficeDatePicker v-model="selectedDate" class="input" aria-label="点名日期" @change="loadOccurrencesForDate" />
+        <SearchSelect v-if="!dayLoading && filteredCourses.length" v-model="selectedCourseId"
+          :options="filteredCourses.map(c => ({ value: c.id, label: `${c.startTime}—${c.endTime} · ${c.name}`, meta: getTeacherName(c.teacherId) }))"
+          placeholder="搜索或选择课程" @update:modelValue="loadCourseStudents" />
+      </div>
+    </div>
+    <div class="tip" v-if="dataLoading"><p>正在加载点名数据…</p></div>
+    <div class="tip" v-else-if="dataError"><p>点名数据加载失败，请重试</p><OfficeButton class="btn btn-secondary" @click="loadData">重试</OfficeButton></div>
+    <div class="tip" v-else-if="dayLoading"><p>正在加载所选日期的课程…</p></div>
+    <div class="tip" v-else-if="courses.length === 0">
       <p>请先创建课程后再进行点名</p>
       <router-link to="/courses" class="btn btn-primary" style="margin-top: 12px">去创建课程</router-link>
     </div>
+    <div class="tip" v-else-if="filteredCourses.length === 0">
+      <p>所选日期没有可以点名的正式课程，请切换日期</p>
+    </div>
 
     <template v-else>
-      <div class="select-course">
-        <label>选择课程</label>
-        <div class="course-picker">
-          <SearchSelect
-            :modelValue="selectedWeekday"
-            @update:modelValue="v => { selectedWeekday = v; onWeekdayChange() }"
-            :options="weekdayList"
-            :searchable="false"
-          />
-          <SearchSelect
-            v-model="selectedCourseId"
-            :options="filteredCourses.map(c => ({ value: c.id, label: c.name, meta: getTeacherName(c.teacherId) }))"
-            placeholder="搜索或选择课程"
-            @update:modelValue="loadCourseStudents"
-          />
-        </div>
-      </div>
-
       <div class="attendance-form" v-if="selectedCourse">
         <div class="form-header">
           <h2>{{ selectedCourse.name }}</h2>
-          <span class="date">{{ today }}</span>
+          <span class="date">{{ selectedDate }} {{ selectedCourse.startTime }}—{{ selectedCourse.endTime }}</span>
         </div>
 
         <div class="student-list">
           <div class="list-header">
             <span>学生名单</span>
             <div class="quick-actions">
-              <button type="button" class="btn btn-text" @click="selectAll">全选</button>
-              <button type="button" class="btn btn-text" @click="deselectAll">取消全选</button>
+              <OfficeButton type="button" class="btn btn-text" @click="selectAll">全选</OfficeButton>
+              <OfficeButton type="button" class="btn btn-text" @click="deselectAll">取消全选</OfficeButton>
             </div>
           </div>
           <div class="students">
@@ -62,18 +59,15 @@
           <span>共 <strong>{{ checkedStudents.length * (selectedCourse.hoursPerClass ?? 1) }}</strong> 课时</span>
         </div>
 
-        <button class="btn btn-primary btn-lg" @click="handleConfirmClick" :disabled="checkedStudents.length === 0">
+        <OfficeButton class="btn btn-primary btn-lg" @click="handleConfirmClick" :disabled="checkedStudents.length === 0">
           确认点名 ({{ checkedStudents.length }} 人)
-        </button>
+        </OfficeButton>
       </div>
 
       <!-- 点名确认弹框 -->
-      <div class="modal-overlay" v-if="showConfirmModal" @click.self="showConfirmModal = false">
+      <OfficeModal v-model:show="showConfirmModal" @update:show="value => { if (!value) { showConfirmModal = false } }">
         <div class="modal modal-sm">
           <h2 class="modal-title">确认点名</h2>
-          <div class="confirm-warning" v-if="isDuplicateAttendance">
-            <p>⚠️ 该课程今天已经点过名了，是否继续点名？</p>
-          </div>
           <div class="confirm-warning" v-if="insufficientStudents.length > 0">
             <p>⚠️ 以下学生课时不足，扣除后余额将为负数：</p>
             <ul class="insufficient-list">
@@ -87,17 +81,18 @@
             <p>共计：<strong>{{ checkedStudents.length * (selectedCourse?.hoursPerClass ?? 1) }}</strong> 课时</p>
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showConfirmModal = false">取消</button>
-            <button class="btn btn-primary" @click="submitAttendance" :disabled="submitting">{{ submitting ? '提交中...' : '确认点名' }}</button>
+            <OfficeButton class="btn btn-secondary" @click="showConfirmModal = false">取消</OfficeButton>
+            <OfficeButton class="btn btn-primary" @click="submitAttendance" :disabled="submitting">{{ submitting ? '提交中...' : '确认点名' }}</OfficeButton>
           </div>
         </div>
-      </div>
+      </OfficeModal>
 
+    </template>
       <!-- 选择性删除弹窗 -->
-      <div class="modal-overlay" v-if="showDeleteModal" @click.self="showDeleteModal = false">
+      <OfficeModal v-model:show="showDeleteModal" @update:show="value => { if (!value) { showDeleteModal = false } }">
         <div class="modal modal-sm">
-          <h2 class="modal-title">删除点名记录</h2>
-          <p class="delete-desc">选择要删除的学生，删除后将还原对应课时：</p>
+          <h2 class="modal-title">撤销点名记录</h2>
+          <p class="delete-desc">选择要撤销的学生，撤销后将还原对应课时：</p>
           <div class="delete-student-list">
             <label class="delete-student-item" v-for="student in deleteTargetStudents" :key="student.id">
               <input type="checkbox" :value="student.id" v-model="deleteCheckedStudents" />
@@ -105,23 +100,30 @@
             </label>
           </div>
           <div class="delete-select-actions">
-            <button type="button" class="btn btn-text" @click="deleteCheckedStudents = deleteTargetStudents.map(s => s.id)">全选</button>
-            <button type="button" class="btn btn-text" @click="deleteCheckedStudents = []">取消全选</button>
+            <OfficeButton type="button" class="btn btn-text" @click="deleteCheckedStudents = deleteTargetStudents.map(s => s.id)">全选</OfficeButton>
+            <OfficeButton type="button" class="btn btn-text" @click="deleteCheckedStudents = []">取消全选</OfficeButton>
           </div>
           <div class="modal-actions">
-            <button class="btn btn-secondary" @click="showDeleteModal = false">取消</button>
-            <button class="btn btn-primary" style="background: var(--color-danger);" @click="confirmDeleteStudents" :disabled="deleteCheckedStudents.length === 0 || submitting">
-              {{ submitting ? '删除中...' : `确认删除 (${deleteCheckedStudents.length} 人)` }}
-            </button>
+            <OfficeButton class="btn btn-secondary" @click="showDeleteModal = false">取消</OfficeButton>
+            <OfficeButton class="btn btn-primary" style="background: var(--color-danger);" @click="confirmDeleteStudents" :disabled="deleteCheckedStudents.length === 0 || submitting">
+              {{ submitting ? '撤销中...' : `确认撤销 (${deleteCheckedStudents.length} 人)` }}
+            </OfficeButton>
           </div>
         </div>
-      </div>
+      </OfficeModal>
 
       <!-- 点名历史 -->
-      <div class="history">
+      <div class="history" v-if="!dataLoading && !dataError">
         <div class="history-header">
-          <h3 class="history-title">点名记录</h3>
+          <div class="history-heading">
+            <h3 class="history-title">点名记录</h3>
+            <div v-if="currentUserTeacherId" class="history-scope" role="group" aria-label="点名记录范围">
+              <OfficeButton type="button" class="btn btn-text" :class="{ selected: historyScope === 'all' }" @click="historyScope = 'all'">全部记录</OfficeButton>
+              <OfficeButton type="button" class="btn btn-text" :class="{ selected: historyScope === 'mine' }" @click="historyScope = 'mine'">我记录的</OfficeButton>
+            </div>
+          </div>
           <div class="filter-group">
+            <OfficeButton class="btn btn-text" :class="{ selected: includeVoided }" @click="toggleVoided">{{ includeVoided ? '隐藏已撤销' : '查看已撤销' }}</OfficeButton>
             <div class="filter-item">
               <SearchSelect
                 v-model="filterCourseId"
@@ -131,9 +133,9 @@
               />
             </div>
             <div class="filter-item month-picker">
-              <button type="button" class="btn btn-secondary month-arrow" @click="changeMonth(-1)">‹</button>
+              <OfficeButton type="button" class="btn btn-secondary month-arrow" @click="changeMonth(-1)">‹</OfficeButton>
               <span class="month-label" @click="toggleMonthDropdown">{{ filterMonthLabel }}</span>
-              <button type="button" class="btn btn-secondary month-arrow" @click="changeMonth(1)">›</button>
+              <OfficeButton type="button" class="btn btn-secondary month-arrow" @click="changeMonth(1)">›</OfficeButton>
               <div class="month-dropdown" v-if="showMonthDropdown" @mousedown.prevent>
                 <div class="month-year-nav">
                   <button type="button" class="month-arrow-sm" @click="monthDropdownYear--">‹</button>
@@ -149,78 +151,67 @@
             </div>
           </div>
         </div>
-        <div class="history-list" v-if="filteredRecords.length > 0">
+        <div class="empty-history" v-if="historyLoading"><p>正在加载点名记录…</p></div>
+        <div class="empty-history" v-else-if="historyError"><p>点名记录加载失败，请重试</p><OfficeButton class="btn btn-secondary" @click="loadHistory">重试</OfficeButton></div>
+        <div class="history-list" v-else-if="filteredRecords.length > 0">
           <div class="history-item" v-for="record in filteredRecords" :key="record.id">
             <div class="history-main">
               <div class="history-row">
-                <span class="history-date">{{ record.date }} {{ record.createdAt?.split(' ')[1] }}</span>
-                <span class="history-course">{{ getCourseName(record.courseId) }}</span>
-                <span class="history-teacher">{{ getTeacherNameByCourse(record.courseId) }}</span>
+                <span class="history-date">{{ record.date }} {{ record.startTime ? `${record.startTime}—${record.endTime}` : record.createdAt?.split(' ')[1] }}</span>
+                <span class="history-course">{{ record.courseName || getCourseName(record.courseId) }}</span>
+                <span class="history-teacher">{{ record.teacherName || getTeacherNameByCourse(record.courseId) }}</span>
               </div>
               <div class="history-row">
-                <span class="history-students">出勤: {{ getStudentNames(record.studentIds) }}</span>
-                <span class="history-hours">扣除 {{ record.hoursDeducted ?? 1 }} 课时/人</span>
+                <span class="history-students">{{ record.voidedAt ? '原出勤' : '出勤' }}: {{ (record.voidedAt ? record.originalStudentIds : record.studentIds).map(id => record.studentNamesSnapshot?.[id] || getStudentNames([id])).join('、') }}</span>
+                <span class="history-hours">{{ record.voidedAt ? '已撤销并还原' : `扣除 ${record.hoursDeducted ?? 1} 课时/人` }}</span>
               </div>
             </div>
-            <button class="btn btn-text delete-btn" @click="openDeleteModal(record)" v-if="canDeleteRecord(record)">删除</button>
+            <OfficeButton class="btn btn-text delete-btn" @click="openDeleteModal(record)" v-if="!record.voidedAt && canDeleteRecord(record)">撤销</OfficeButton>
           </div>
         </div>
         <div class="empty-history" v-else>
           <p>暂无点名记录</p>
         </div>
-        <button v-if="hasMoreRecords" class="btn btn-secondary load-more-btn" @click="loadMoreRecords">加载更多记录</button>
+        <OfficeButton v-if="hasMoreRecords && !historyLoading" class="btn btn-secondary load-more-btn" :disabled="loadingMore" @click="loadMoreRecords">{{ loadingMore ? '加载中…' : '加载更多记录' }}</OfficeButton>
       </div>
-    </template>
-
-    <!-- 空状态弹窗:当前 weekday 没课时提示,picker 仍可操作 -->
-    <div class="modal-overlay" v-if="showEmptyModal" @click.self="showEmptyModal = false">
-      <div class="modal modal-sm">
-        <h2 class="modal-title">无法点名</h2>
-        <p class="empty-modal-body">当前所选日期（{{ weekdayMap[selectedWeekday] }}）没有课程，请选择其他日期或前往课程管理页面创建。</p>
-        <div class="modal-actions">
-          <button class="btn btn-primary" @click="showEmptyModal = false">我知道了</button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import { getCourses, getStudents, getTeachers, getAttendance, getAttendancePage, addAttendance, removeStudentsFromRecord } from '../utils/storage'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { getCourses, getCourseOccurrences, getStudents, getTeachers, getAttendancePage, addAttendance, removeStudentsFromRecord } from '../utils/storage'
 import { useToast } from '../composables/useToast'
+import { useAuthStore } from '../stores/auth.js'
 import SearchSelect from '../components/SearchSelect.vue'
 
 const toast = useToast()
-const useApi = import.meta.env.VITE_USE_API === 'true'
-const isAdmin = computed(() => {
-  if (!useApi) return true
-  try {
-    const user = JSON.parse(localStorage.getItem('user') || 'null')
-    return user?.role === 'admin'
-  } catch { return false }
-})
-const currentUserTeacherId = computed(() => {
-  if (!useApi) return null
-  try {
-    const user = JSON.parse(localStorage.getItem('user') || 'null')
-    return user?.teacherId || null
-  } catch { return null }
-})
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.isAdmin)
+const currentUserTeacherId = computed(() => auth.teacherId)
 const courses = ref([])
+const dataLoading = ref(true)
+const dataError = ref(false)
+const dayCourses = ref([])
+const dayLoading = ref(false)
+let occurrenceRequestId = 0
+let dataRequestId = 0
+let dataErrorToast = null
+let dayErrorToast = null
 const students = ref([])
 const teachers = ref([])
 const attendanceRecords = ref([])
+const includeVoided = ref(false)
 const hasMoreRecords = ref(false)
+const historyLoading = ref(false)
+const historyError = ref(false)
+const loadingMore = ref(false)
+let historyRequestId = 0
+let historyErrorToast = null
 const selectedCourseId = ref('')
-const todayWeekday = new Date().getDay() || 7
-const selectedWeekday = ref(todayWeekday)
-const weekdayList = [
-  { value: 1, label: '周一' }, { value: 2, label: '周二' }, { value: 3, label: '周三' },
-  { value: 4, label: '周四' }, { value: 5, label: '周五' }, { value: 6, label: '周六' },
-  { value: 7, label: '周日' }
-]
+const todayStr = ref(new Date().toLocaleDateString('sv-SE'))
+const selectedDate = ref(todayStr.value)
 const filterCourseId = ref('')
+const historyScope = ref('all')
 const nowDate = new Date()
 const filterMonth = ref(`${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}`)
 const showMonthDropdown = ref(false)
@@ -262,23 +253,11 @@ function closeMonthDropdown(e) {
 const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
-const isDuplicateAttendance = ref(false)
-const showEmptyModal = ref(false)
 
 // 选择性删除相关
 const showDeleteModal = ref(false)
 const deleteTargetRecord = ref(null)
 const deleteCheckedStudents = ref([])
-
-// 检查今天是否已经点过名
-function hasTodayAttendance() {
-  if (!selectedCourse.value) return false
-  const d = new Date()
-  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  return attendanceRecords.value.some(r =>
-    r.courseId === selectedCourse.value.id && r.date === today
-  )
-}
 
 // 课时不足的学生
 const insufficientStudents = ref([])
@@ -303,9 +282,19 @@ function isInsufficient(student) {
 }
 
 // 点击确认点名按钮
-function handleConfirmClick() {
-  isDuplicateAttendance.value = hasTodayAttendance()
-  const hoursNeeded = selectedCourse.value?.hoursPerClass ?? 1
+async function handleConfirmClick() {
+  const course = selectedCourse.value
+  const date = selectedDate.value
+  if (!course || dayLoading.value) return
+  try {
+    const existing = await getAttendancePage({ limit: 1, courseId: course.courseId, date, originalDate: course.originalDate })
+    if (date !== selectedDate.value || selectedCourse.value?.id !== course.id) return
+    if (existing.data?.length) return toast.error('该课次已经点名，请到点名记录中查看或撤销')
+  } catch (error) {
+    if (date === selectedDate.value && selectedCourse.value?.id === course.id) toast.error(error.message || '点名记录检查失败')
+    return
+  }
+  const hoursNeeded = course.hoursPerClass ?? 1
   insufficientStudents.value = checkedStudents.value
     .map(id => courseStudents.value.find(s => s.id === id))
     .filter(s => s && getRemainingHours(s) < hoursNeeded)
@@ -313,53 +302,139 @@ function handleConfirmClick() {
   showConfirmModal.value = true
 }
 
-const today = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
-
 async function loadData() {
-  const [c, s, t, page] = await Promise.all([
-    getCourses(), getStudents(), getTeachers(), getAttendancePage({ limit: 50 })
-  ])
-  courses.value = c || []
-  students.value = s || []
-  teachers.value = t || []
-  const pageData = page || {}
-  attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
-  hasMoreRecords.value = pageData.hasMore || false
+  const requestId = ++dataRequestId
+  dataLoading.value = true
+  dataError.value = false
+  try {
+    const [c, s, t] = await Promise.all([
+      getCourses({ includeArchived: true }), getStudents(), getTeachers()
+    ])
+    if (requestId !== dataRequestId) return
+    courses.value = c || []
+    await loadOccurrencesForDate()
+    if (requestId !== dataRequestId) return
+    students.value = s || []
+    teachers.value = t || []
+    await loadHistory()
+    if (requestId === dataRequestId && !dataError.value) {
+      toast.clearError(dataErrorToast)
+      dataErrorToast = null
+    }
+  } catch (error) { if (requestId === dataRequestId) { dataError.value = true; dataErrorToast = toast.error(error.message || '点名数据加载失败') } }
+  finally { if (requestId === dataRequestId) dataLoading.value = false }
+}
 
-  if (courses.value.length > 0 && !courses.value.some(c => c.weekday === selectedWeekday.value)) {
-    const weekdays = [...new Set(courses.value.map(c => c.weekday))].sort()
-    selectedWeekday.value = weekdays[0]
+async function loadHistory() {
+  const requestId = ++historyRequestId
+  historyLoading.value = true
+  historyError.value = false
+  attendanceRecords.value = []
+  hasMoreRecords.value = false
+  try {
+    const page = await getAttendancePage({ limit: 50, includeVoided: includeVoided.value, scope: historyScope.value,
+      courseId: filterCourseId.value, month: filterMonth.value })
+    if (requestId !== historyRequestId) return
+    attendanceRecords.value = (page.data || []).reverse()
+    hasMoreRecords.value = !!page.hasMore
+    toast.clearError(historyErrorToast)
+    historyErrorToast = null
+  } catch (error) {
+    if (requestId === historyRequestId) { historyError.value = true; historyErrorToast = toast.error(error.message || '点名记录加载失败') }
+  } finally {
+    if (requestId === historyRequestId) historyLoading.value = false
   }
 }
 
-onMounted(async () => {
-  await loadData()
+watch([filterCourseId, filterMonth, historyScope], loadHistory)
+
+async function loadOccurrencesForDate() {
+  const requestId = ++occurrenceRequestId
+  const date = selectedDate.value
+  dayLoading.value = true
+  dataError.value = false
+  dayCourses.value = []
+  selectedCourseId.value = ''
+  courseStudents.value = []
+  checkedStudents.value = []
+  try {
+    const rows = await getCourseOccurrences(date, date)
+    if (requestId !== occurrenceRequestId) return
+    dayCourses.value = rows || []
+    toast.clearError(dayErrorToast)
+    dayErrorToast = null
+  } catch (error) {
+    if (requestId !== occurrenceRequestId) return
+    dataError.value = true
+    dayErrorToast = toast.error(error.message || '所选日期课程加载失败')
+  } finally {
+    if (requestId === occurrenceRequestId) dayLoading.value = false
+  }
+}
+
+function refreshToday(reloadDay = true) {
+  if (submitting.value) return
+  const next = new Date().toLocaleDateString('sv-SE')
+  if (next === todayStr.value) return
+  const previous = todayStr.value
+  const followToday = selectedDate.value === previous
+  todayStr.value = next
+  if (!followToday) return
+  showConfirmModal.value = false
+  selectedDate.value = next
+  if (filterMonth.value === previous.slice(0, 7)) filterMonth.value = next.slice(0, 7)
+  if (reloadDay) loadOccurrencesForDate()
+}
+let midnightTimer
+function scheduleMidnightRefresh() {
+  clearTimeout(midnightTimer)
+  const now = new Date()
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  midnightTimer = setTimeout(() => { refreshToday(); scheduleMidnightRefresh() }, nextMidnight - now + 50)
+}
+onMounted(() => {
   document.addEventListener('visibilitychange', handleVisibilityChange)
   document.addEventListener('click', closeMonthDropdown, true)
+  scheduleMidnightRefresh()
+  loadData()
 })
 
 onUnmounted(() => {
+  dataRequestId++
+  occurrenceRequestId++
+  historyRequestId++
+  clearTimeout(midnightTimer)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   document.removeEventListener('click', closeMonthDropdown, true)
 })
 
 function handleVisibilityChange() {
-  if (document.visibilityState === 'visible') {
-    loadData()
-  }
+  if (document.visibilityState !== 'visible' || submitting.value) return
+  refreshToday(false)
+  loadData()
+  scheduleMidnightRefresh()
 }
 
 async function loadMoreRecords() {
-  const currentCount = attendanceRecords.value.length
-  const page = await getAttendancePage({ limit: 50, offset: currentCount })
-  const pageData = page || {}
-  const newData = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
-  attendanceRecords.value = [...newData, ...attendanceRecords.value]
-  hasMoreRecords.value = pageData.hasMore || false
+  if (loadingMore.value || historyLoading.value || !hasMoreRecords.value) return
+  const requestId = historyRequestId
+  loadingMore.value = true
+  try {
+    const currentCount = attendanceRecords.value.length
+    const page = await getAttendancePage({ limit: 50, offset: currentCount, includeVoided: includeVoided.value, scope: historyScope.value,
+      courseId: filterCourseId.value, month: filterMonth.value })
+    if (requestId !== historyRequestId) return
+    const newData = (page.data || []).reverse()
+    attendanceRecords.value = [...newData, ...attendanceRecords.value]
+    hasMoreRecords.value = !!page.hasMore
+  } catch (error) { toast.error(error.message || '点名记录加载失败') }
+  finally { loadingMore.value = false }
 }
 
+function toggleVoided() { includeVoided.value = !includeVoided.value; loadHistory() }
+
 const selectedCourse = computed(() => {
-  return courses.value.find(c => c.id === selectedCourseId.value)
+  return dayCourses.value.find(c => c.id === selectedCourseId.value)
 })
 
 const sortedCourseStudents = computed(() => {
@@ -367,35 +442,11 @@ const sortedCourseStudents = computed(() => {
 })
 
 const filteredCourses = computed(() => {
-  return courses.value.filter(c => c.weekday === selectedWeekday.value)
+  const activeIds = new Set(courses.value.filter(c => !c.archivedAt).map(c => c.id))
+  return dayCourses.value.filter(c => activeIds.has(c.courseId) && (isAdmin.value || c.teacherId === currentUserTeacherId.value))
 })
 
-watch(filteredCourses, (list) => {
-  showEmptyModal.value = list.length === 0 && courses.value.length > 0
-}, { immediate: true })
-
-function onWeekdayChange() {
-  selectedCourseId.value = ''
-  courseStudents.value = []
-  checkedStudents.value = []
-}
-
-const filteredRecords = computed(() => {
-  let result = attendanceRecords.value
-  if (filterCourseId.value) {
-    result = result.filter(r => r.courseId === filterCourseId.value)
-  }
-  if (filterMonth.value) {
-    result = result.filter(r => r.date && r.date.startsWith(filterMonth.value))
-  }
-  return result
-})
-
-const weekdayMap = { 1: '星期一', 2: '星期二', 3: '星期三', 4: '星期四', 5: '星期五', 6: '星期六', 7: '星期日' }
-
-function getWeekdayText(weekday) {
-  return weekdayMap[weekday] || ''
-}
+const filteredRecords = computed(() => attendanceRecords.value)
 
 function getTeacherName(teacherId) {
   const teacher = teachers.value.find(t => t.id === teacherId)
@@ -442,6 +493,7 @@ function deselectAll() {
 }
 
 const submitting = ref(false)
+watch(submitting, busy => { if (!busy) refreshToday() })
 
 async function submitAttendance() {
   if (!selectedCourse.value || checkedStudents.value.length === 0) return
@@ -449,42 +501,50 @@ async function submitAttendance() {
 
   submitting.value = true
   try {
-    // 提交前刷新课程数据，确认课程仍属于当前老师
-    const freshCourses = await getCourses()
-    const freshCourse = (freshCourses || []).find(c => c.id === selectedCourse.value.id)
-    if (!freshCourse) {
-      toast.error('该课程已移交，无法点名')
+    // 重新读取实际课次；固定课表、交接和课时规则可能在弹窗打开后改变。
+    const freshOccurrences = await getCourseOccurrences(selectedDate.value, selectedDate.value)
+    const freshCourse = (freshOccurrences || []).find(c => c.courseId === selectedCourse.value.courseId && c.originalDate === selectedCourse.value.originalDate)
+    if (!freshCourse || (currentUserTeacherId.value && freshCourse.teacherId !== currentUserTeacherId.value)) {
+      toast.error('该课次已变更或移交，请重新选择')
       showConfirmModal.value = false
-      courses.value = freshCourses || []
+      await loadOccurrencesForDate()
       selectedCourseId.value = ''
       courseStudents.value = []
       checkedStudents.value = []
       return
     }
-
-    const hoursPerStudent = freshCourse.hoursPerClass || 1
+    if (checkedStudents.value.some(id => !freshCourse.studentIds.includes(id))) {
+      toast.error('课程名单已变更，请重新选择学生')
+      showConfirmModal.value = false
+      await loadOccurrencesForDate()
+      return
+    }
 
     // 记录点名（后端会自动扣课时）
-    const now = new Date()
+    const attendedIds = [...checkedStudents.value]
     await addAttendance({
-      courseId: freshCourse.id,
-      date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`,
-      studentIds: [...checkedStudents.value],
-      hoursDeducted: hoursPerStudent
+      courseId: freshCourse.courseId,
+      date: selectedDate.value,
+      originalDate: freshCourse.originalDate,
+      studentIds: attendedIds
     })
 
-    // 更新本地数据
-    students.value = await getStudents() || []
-    const page = await getAttendancePage({ limit: 50 })
-    const pageData = page || {}
-    attendanceRecords.value = (Array.isArray(pageData) ? pageData : pageData.data || []).reverse()
-    hasMoreRecords.value = pageData.hasMore || false
-
-    // 重置
+    // 写入已完成，后续读取失败不能再把点名提示为失败。
     showConfirmModal.value = false
-    checkedStudents.value = []
-    toast.success('点名成功！已扣除对应课时。')
+    students.value = students.value.map(student => attendedIds.includes(student.id)
+      ? { ...student, usedHours: Number(student.usedHours || 0) + Number(freshCourse.hoursPerClass ?? 1) }
+      : student)
+    let refreshFailed = false
+    try { students.value = await getStudents() || [] }
+    catch { refreshFailed = true }
+    filterMonth.value = selectedDate.value.slice(0, 7)
+    await loadHistory()
+
     loadCourseStudents()
+    checkedStudents.value = []
+    if (refreshFailed) toast.warning('点名已成功，学生资料刷新失败，请稍后重试')
+    else if (historyError.value) toast.warning('点名已成功，点名记录刷新失败，请稍后重试')
+    else toast.success('点名成功！已扣除对应课时。')
   } catch (err) {
     toast.error(err.message || '点名失败')
   } finally {
@@ -496,14 +556,16 @@ async function submitAttendance() {
 const deleteTargetStudents = computed(() => {
   if (!deleteTargetRecord.value) return []
   return (deleteTargetRecord.value.studentIds || [])
-    .map(id => students.value.find(s => s.id === id))
+    .map(id => {
+      const student = students.value.find(s => s.id === id)
+      return student && { ...student, name: deleteTargetRecord.value.studentNamesSnapshot?.[id] || student.name }
+    })
     .filter(Boolean)
 })
 
 function canDeleteRecord(record) {
   if (isAdmin.value) return true
-  if (!record.recordedBy) return true
-  return record.recordedBy === currentUserTeacherId.value
+  return !!currentUserTeacherId.value && record.recordedBy === currentUserTeacherId.value
 }
 
 function openDeleteModal(record) {
@@ -517,18 +579,29 @@ async function confirmDeleteStudents() {
 
   submitting.value = true
   try {
-    const result = await removeStudentsFromRecord(
-      deleteTargetRecord.value.id,
-      deleteCheckedStudents.value
+    const targetRecord = deleteTargetRecord.value
+    const removedIds = [...deleteCheckedStudents.value]
+    await removeStudentsFromRecord(
+      targetRecord.id,
+      removedIds
     )
-    attendanceRecords.value = result
-    students.value = await getStudents() || []
+    // 撤销写入已完成；资料刷新失败时不可提示“删除失败”并诱导重复提交。
     showDeleteModal.value = false
+    students.value = students.value.map(student => removedIds.includes(student.id)
+      ? { ...student, usedHours: Number(student.usedHours || 0) - Number(targetRecord.hoursDeducted ?? 1) }
+      : student)
+    await loadHistory()
+    let refreshFailed = false
+    try { students.value = await getStudents() || [] }
+    catch { refreshFailed = true }
+    loadCourseStudents()
 
-    if (deleteCheckedStudents.value.length === (deleteTargetRecord.value.studentIds || []).length) {
-      toast.success('已删除整条点名记录并还原所有学生课时。')
+    if (refreshFailed) toast.warning('撤销已成功，学生资料刷新失败，请稍后重试')
+    else if (historyError.value) toast.warning('撤销已成功，点名记录刷新失败，请稍后重试')
+    else if (removedIds.length === (targetRecord.studentIds || []).length) {
+      toast.success('已撤销整条点名记录并还原所有学生课时。')
     } else {
-      toast.success(`已删除 ${deleteCheckedStudents.value.length} 名学生并还原课时。`)
+      toast.success(`已撤销 ${removedIds.length} 名学生的点名并还原课时。`)
     }
   } catch (err) {
     toast.error(err.message || '删除失败')
@@ -539,6 +612,7 @@ async function confirmDeleteStudents() {
 </script>
 
 <style scoped>
+.filter-group .selected { background: var(--color-selected); font-weight: 650; }
 .attendance {
   max-width: 800px;
   margin: 0 auto;
@@ -580,7 +654,7 @@ async function confirmDeleteStudents() {
   gap: 16px;
 }
 
-.select-course label {
+.select-course > label {
   font-size: 18px;
   font-weight: 600;
   color: var(--color-text);
@@ -594,6 +668,7 @@ async function confirmDeleteStudents() {
   max-width: 480px;
   width: 100%;
 }
+.course-picker > * { flex: 1; min-width: 0; }
 
 .attendance-form {
   background: white;
@@ -660,11 +735,11 @@ async function confirmDeleteStudents() {
 }
 
 .student-item:has(input:checked) {
-  background: rgba(0, 113, 227, 0.1);
+  background: rgba(65, 120, 185, 0.1);
 }
 
 .student-item.student-insufficient {
-  background: rgba(255, 59, 48, 0.08);
+  background: rgba(179, 79, 80, 0.08);
 }
 
 .hours-low {
@@ -737,8 +812,14 @@ async function confirmDeleteStudents() {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   margin-bottom: 16px;
 }
+
+.history-heading { display: grid; gap: 5px; }
+.history-scope { display: flex; gap: 4px; }
+.history-scope .btn { padding: 3px 8px; font-size: 12px; }
+.history-scope .selected { background: var(--color-selected); font-weight: 650; }
 
 .history-title {
   font-size: 18px;
@@ -930,13 +1011,6 @@ async function confirmDeleteStudents() {
   margin-bottom: 16px;
 }
 
-.empty-modal-body {
-  font-size: 14px;
-  color: var(--color-text-secondary);
-  margin-bottom: 24px;
-  line-height: 1.6;
-}
-
 .delete-student-list {
   display: flex;
   flex-direction: column;
@@ -1026,8 +1100,8 @@ async function confirmDeleteStudents() {
 }
 
 .confirm-warning {
-  background: #fff3cd;
-  border: 1px solid #ffc107;
+  background: #fff8ea;
+  border: 1px solid #e8d6b6;
   border-radius: var(--radius-md);
   padding: 12px 16px;
   margin-bottom: 16px;
@@ -1036,7 +1110,7 @@ async function confirmDeleteStudents() {
 
 .confirm-warning p {
   margin: 0;
-  color: #856404;
+  color: #815618;
   font-size: 14px;
   font-weight: 500;
 }
@@ -1075,7 +1149,7 @@ async function confirmDeleteStudents() {
     align-items: stretch;
     gap: 12px;
   }
-  .select-course label {
+  .select-course > label {
     font-size: 18px;
     font-weight: 600;
     text-align: center;
@@ -1141,5 +1215,11 @@ async function confirmDeleteStudents() {
     flex-direction: column;
     gap: 4px;
   }
+}
+@media (max-width: 599px) {
+  .history-header { align-items: stretch; }
+  .filter-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .filter-group > .btn { width: 100%; }
+  .filter-item.month-picker { grid-column: 1 / -1; min-height: 34px; }
 }
 </style>

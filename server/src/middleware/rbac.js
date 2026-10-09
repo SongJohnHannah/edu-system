@@ -17,6 +17,7 @@ export function filterByTeacher(req, res, next) {
   if (req.user.role === 'admin') {
     req.teacherScope = null
   } else if (req.user.role === 'teacher') {
+    if (!req.user.teacherId) return res.status(403).json({ error: '教师账号未关联教师资料' })
     req.teacherScope = req.user.teacherId
   } else {
     return res.status(403).json({ error: '未知角色' })

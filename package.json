@@ -5,17 +5,17 @@
   "description": "教务管理系统 - 小型培训机构教务管理工具",
   "author": "EduSystem",
   "type": "module",
-  "main": "electron/main.cjs",
   "scripts": {
+    "check:file-lines": "node scripts/check-file-lengths.mjs",
+    "prebuild": "npm run check:file-lines",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "electron:dev": "vite build && electron .",
-    "electron:build": "vite build && electron-builder",
-    "electron:build:mac": "vite build && electron-builder --mac",
-    "electron:build:win": "vite build && electron-builder --win"
+    "test:unit": "node --test tests/teacher-colors.test.mjs tests/history-pagination.test.mjs tests/auth-client.test.mjs tests/auth-refresh-timeout.test.mjs tests/backup-client.test.mjs tests/schedule-layout.test.mjs",
+    "test:ui": "node scripts/run-ui-tests.mjs",
+    "preview": "vite preview"
   },
   "dependencies": {
+    "naive-ui": "^2.45.3",
     "pinia": "^2.1.7",
     "vue": "^3.4.21",
     "vue-router": "^4.3.0"
@@ -23,45 +23,7 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@vitejs/plugin-vue": "^5.0.4",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.1",
     "pm2": "^6.0.14",
     "vite": "^5.2.0"
-  },
-  "build": {
-    "appId": "com.edusystem.app",
-    "productName": "EduSystem",
-    "directories": {
-      "output": "release"
-    },
-    "mac": {
-      "category": "public.app-category.education",
-      "hardenedRuntime": false,
-      "gatekeeperAssess": false,
-      "icon": "build/icon.icns",
-      "target": [
-        {
-          "target": "zip",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ]
-    },
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*"
-    ]
   }
 }

@@ -9,7 +9,7 @@
     </div>
 
     <!-- 时间筛选器 -->
-    <div class="filter-section">
+    <div class="filter-section"><div v-if="auth.teacherId" class="preset-filters"><OfficeButton :class="scope === 'all' ? 'btn btn-primary' : 'btn btn-secondary'" @click="scope = 'all'; loadData()">全部教师</OfficeButton><OfficeButton :class="scope === 'mine' ? 'btn btn-primary' : 'btn btn-secondary'" @click="scope = 'mine'; loadData()">我的统计</OfficeButton></div>
       <div class="preset-filters">
         <button
           v-for="preset in presets"
@@ -22,16 +22,22 @@
         </button>
       </div>
       <div class="custom-range" v-if="activePreset === 'custom'">
-        <input type="date" class="input date-input" v-model="customStartDate" />
+        <OfficeDatePicker class="input date-input" v-model="customStartDate" aria-label="开始日期" />
         <span class="date-separator">至</span>
-        <input type="date" class="input date-input" v-model="customEndDate" />
-        <button class="btn btn-primary btn-sm" @click="applyCustomRange">应用</button>
+        <OfficeDatePicker class="input date-input" v-model="customEndDate" aria-label="结束日期" />
+        <OfficeButton class="btn btn-primary btn-sm" @click="applyCustomRange">应用</OfficeButton>
       </div>
       <div class="current-range">
         {{ formatDateRange(startDate, endDate) }}
       </div>
     </div>
 
+    <div v-if="loading" class="status-panel">正在加载统计…</div>
+    <div v-else-if="loadError" class="status-panel">
+      <p>统计加载失败，请重试</p>
+      <OfficeButton class="btn btn-secondary" @click="loadData">重试</OfficeButton>
+    </div>
+    <template v-else>
     <!-- 统计卡片 -->
     <div class="stats-grid">
       <div class="stat-card">
@@ -43,7 +49,7 @@
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ overallStats.activeTeachers }} / {{ overallStats.totalTeachers }}</span>
-          <span class="stat-label">活跃教师 / 总教师</span>
+          <span class="stat-label">本期授课教师 / 教师总数</span>
         </div>
       </div>
 
@@ -78,7 +84,7 @@
     <div class="section">
       <h2 class="section-title">教师工作量明细</h2>
       <div class="table-container">
-        <table class="table">
+        <OfficeTable class="table">
           <thead>
             <tr>
               <th>教师</th>
@@ -95,6 +101,7 @@
                 <div class="teacher-cell">
                   <div class="teacher-avatar">{{ (stat.name || '?').charAt(0) }}</div>
                   <span class="teacher-name">{{ stat.name }}</span>
+                  <span v-if="stat.status === 'deleted'" class="teacher-stopped">已停用</span>
                 </div>
               </td>
               <td>{{ stat.subject || '-' }}</td>
@@ -104,14 +111,14 @@
               <td class="hours-cell">{{ stat.consumedHours }} 课时</td>
             </tr>
           </tbody>
-        </table>
+        </OfficeTable>
         <div class="empty-state" v-if="teacherStats.length === 0">
           <p>暂无教师数据</p>
         </div>
       </div>
     </div>
 
-    <!-- 上课日分布图表 -->
+    <!-- 所选日期内实际课次分布图表 -->
     <div class="section">
       <h2 class="section-title">课程分布（按上课日）</h2>
       <div class="chart-container">
@@ -124,23 +131,32 @@
                 :style="{ width: getBarWidth(count) + '%' }"
                 :class="{ 'bar-highlight': count > 0 }"
               ></div>
-              <span class="bar-value">{{ count }} 门</span>
+              <span class="bar-value">{{ count }} 课次</span>
             </div>
           </div>
         </div>
       </div>
     </div>
+    </template>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import {
   getTeacherStats,
   getWeekdayDistribution,
   getOverallStats,
   getDateRange
 } from '../utils/storage'
+import { useAuthStore } from '../stores/auth.js'
+import { useToast } from '../composables/useToast.js'
+
+const auth = useAuthStore()
+const toast = useToast()
+const scope = ref('all')
+const loading = ref(true)
+const loadError = ref(false)
 
 // 时间筛选
 const presets = [
@@ -170,17 +186,34 @@ const weekdayDistribution = ref([0, 0, 0, 0, 0, 0, 0])
 const weekdayLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 // 加载数据
+let loadRequest = 0
+let loadErrorToast = null
 async function loadData() {
-  teacherStats.value = await getTeacherStats(startDate.value, endDate.value) || []
-  overallStats.value = await getOverallStats(startDate.value, endDate.value) || {}
-  weekdayDistribution.value = await getWeekdayDistribution() || []
+  const request = ++loadRequest
+  loading.value = true
+  loadError.value = false
+  try {
+    const [teachers, overall, distribution] = await Promise.all([
+      getTeacherStats(startDate.value, endDate.value, scope.value),
+      getOverallStats(startDate.value, endDate.value, scope.value),
+      getWeekdayDistribution(startDate.value, endDate.value, scope.value)
+    ])
+    if (request !== loadRequest) return
+    teacherStats.value = teachers || []
+    overallStats.value = overall || {}
+    weekdayDistribution.value = distribution || [0, 0, 0, 0, 0, 0, 0]
+    toast.clearError(loadErrorToast)
+    loadErrorToast = null
+  } catch (error) {
+    if (request === loadRequest) { loadError.value = true; loadErrorToast = toast.error(error.message || '统计加载失败') }
+  } finally { if (request === loadRequest) loading.value = false }
 }
 
 // 设置预设时间范围
-async function setPreset(preset) {
+function setPreset(preset) {
   activePreset.value = preset
   if (preset !== 'custom') {
-    const range = await getDateRange(preset)
+    const range = getDateRange(preset)
     startDate.value = range.start
     endDate.value = range.end
     loadData()
@@ -190,8 +223,14 @@ async function setPreset(preset) {
 // 应用自定义时间范围
 function applyCustomRange() {
   if (customStartDate.value && customEndDate.value) {
-    startDate.value = new Date(customStartDate.value)
-    endDate.value = new Date(customEndDate.value)
+    const start = new Date(`${customStartDate.value}T12:00:00`)
+    const end = new Date(`${customEndDate.value}T12:00:00`)
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end < start || (end - start) / 86400000 > 366) {
+      toast.error('请选择有效日期，统计范围不超过一年')
+      return
+    }
+    startDate.value = start
+    endDate.value = end
     loadData()
   }
 }
@@ -213,12 +252,44 @@ function getBarWidth(count) {
   return (count / max) * 100
 }
 
-onMounted(async () => {
+let dayTimer
+let currentDay = new Date().toDateString()
+function scheduleDayRefresh() {
+  clearTimeout(dayTimer)
+  const now = new Date()
+  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime()
+  dayTimer = setTimeout(refreshDay, Math.max(50, next - now.getTime() + 50))
+}
+function refreshDay() {
+  const day = new Date().toDateString()
+  const changed = day !== currentDay
+  currentDay = day
+  if (changed && activePreset.value !== 'custom') {
+    const range = getDateRange(activePreset.value)
+    startDate.value = range.start
+    endDate.value = range.end
+    loadData()
+  }
+  scheduleDayRefresh()
+  return changed
+}
+function refreshVisible() {
+  if (document.visibilityState !== 'visible') return
+  if (!refreshDay() || activePreset.value === 'custom') loadData()
+}
+onMounted(() => {
   // 初始化为本月
-  const range = await getDateRange('month')
+  const range = getDateRange('month')
   startDate.value = range.start
   endDate.value = range.end
   loadData()
+  scheduleDayRefresh()
+  document.addEventListener('visibilitychange', refreshVisible)
+})
+onUnmounted(() => {
+  loadRequest++
+  clearTimeout(dayTimer)
+  document.removeEventListener('visibilitychange', refreshVisible)
 })
 </script>
 
@@ -341,9 +412,9 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 
-.stat-icon.teachers { background: rgba(52, 199, 89, 0.1); color: var(--color-success); }
-.stat-icon.attendance { background: rgba(175, 82, 222, 0.1); color: #af52de; }
-.stat-icon.hours { background: rgba(255, 59, 48, 0.1); color: var(--color-danger); }
+.stat-icon.teachers { background: rgba(53, 124, 101, 0.1); color: var(--color-success); }
+.stat-icon.attendance { background: var(--color-selected); color: var(--color-primary); }
+.stat-icon.hours { background: rgba(179, 79, 80, 0.1); color: var(--color-danger); }
 
 .stat-info {
   display: flex;
@@ -390,7 +461,7 @@ onMounted(async () => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--color-primary), #00c7be);
+  background: var(--color-primary);
   color: white;
   display: flex;
   align-items: center;
@@ -404,6 +475,8 @@ onMounted(async () => {
   color: var(--color-text);
 }
 
+.teacher-stopped { flex: none; padding: 2px 6px; border: 1px solid var(--color-border); border-radius: 5px; color: var(--color-text-secondary); background: var(--color-bg-secondary); font-size: 11px; }
+
 .hours-cell {
   font-weight: 600;
   color: var(--color-primary);
@@ -414,6 +487,8 @@ onMounted(async () => {
   padding: 48px 24px;
   color: var(--color-text-secondary);
 }
+.status-panel { text-align: center; padding: 48px 24px; margin-bottom: 24px; border-radius: var(--radius-lg); background: white; color: var(--color-text-secondary); box-shadow: var(--shadow-sm); }
+.status-panel .btn { margin-top: 12px; }
 
 /* 图表区域 */
 .chart-container {
@@ -459,7 +534,7 @@ onMounted(async () => {
 }
 
 .bar-highlight {
-  background: linear-gradient(90deg, var(--color-primary), #00c7be);
+  background: var(--color-primary);
 }
 
 .bar-value {

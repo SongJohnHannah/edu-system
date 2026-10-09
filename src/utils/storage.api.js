@@ -1,5 +1,5 @@
-// 远程 API 存储适配器 - 所有函数与 storage.local.js 保持相同签名（async 版本）
-import { api } from './api.js'
+// 教务数据统一经服务端 API 读写。
+import { api, apiUrl } from './api.js'
 
 // ========== 学生相关 ==========
 
@@ -8,18 +8,15 @@ export async function getStudents() {
 }
 
 export async function addStudent(student) {
-  const result = await api.post('/students', student)
-  return api.get('/students')
+  return api.post('/students', student)
 }
 
 export async function updateStudent(id, updates) {
-  await api.put(`/students/${id}`, updates)
-  return api.get('/students')
+  return api.put(`/students/${id}`, updates)
 }
 
 export async function deleteStudent(id) {
-  await api.del(`/students/${id}`)
-  return api.get('/students')
+  return api.del(`/students/${id}`)
 }
 
 export async function checkStudentNameExists(name, excludeId = null) {
@@ -27,29 +24,26 @@ export async function checkStudentNameExists(name, excludeId = null) {
   return result.exists
 }
 
-export async function saveStudents(students) {
-  throw new Error('API 模式不支持批量保存，请使用 addStudent/updateStudent')
-}
-
 export async function addStudentsBatch(studentList, defaultHours = 0) {
   const result = await api.post('/students/batch', { students: studentList, defaultHours })
-  const allStudents = await api.get('/students')
-  return { students: allStudents, addedCount: result.addedCount, skipped: result.skipped || [] }
+  try {
+    const allStudents = await api.get('/students')
+    return { students: allStudents, addedCount: result.addedCount, skipped: result.skipped || [] }
+  } catch {
+    return { students: null, addedCount: result.addedCount, skipped: result.skipped || [], refreshFailed: true }
+  }
 }
 
 export async function updateStudentStatus(studentId, status) {
-  await api.put(`/students/${studentId}/status`, { status })
-  return api.get('/students')
+  return api.put(`/students/${studentId}/status`, { status })
 }
 
 export async function addHours(studentId, hours, remark = '') {
-  await api.post(`/students/${studentId}/add-hours`, { hours, remark })
-  return api.get('/students')
+  return api.post(`/students/${studentId}/add-hours`, { hours, remark })
 }
 
 export async function subtractHours(studentId, hours, remark = '') {
-  await api.post(`/students/${studentId}/subtract-hours`, { hours, remark })
-  return api.get('/students')
+  return api.post(`/students/${studentId}/subtract-hours`, { hours, remark })
 }
 
 // ========== 教师相关 ==========
@@ -58,76 +52,73 @@ export async function getTeachers() {
   return api.get('/teachers')
 }
 
-export async function saveTeachers(teachers) {
-  throw new Error('API 模式不支持批量保存')
-}
-
 export async function addTeacher(teacher) {
   const result = await api.post('/teachers', teacher)
-  const allTeachers = await api.get('/teachers')
-  return { teachers: allTeachers, defaultPassword: result.defaultPassword, username: result.username }
+  const { defaultPassword, username, ...createdTeacher } = result
+  try {
+    const allTeachers = await api.get('/teachers')
+    return { teachers: allTeachers, defaultPassword, username }
+  } catch {
+    return { teachers: null, createdTeacher, defaultPassword, username, refreshFailed: true }
+  }
 }
 
 export async function updateTeacher(id, updates) {
-  await api.put(`/teachers/${id}`, updates)
-  return api.get('/teachers')
+  return api.put(`/teachers/${id}`, updates)
 }
 
 export async function deleteTeacher(id) {
-  await api.del(`/teachers/${id}`)
-  return api.get('/teachers')
+  return api.del(`/teachers/${id}`)
 }
 
 export async function updateTeacherStatus(id, status) {
-  await api.put(`/teachers/${id}/status`, { status })
-  return api.get('/teachers')
+  return api.put(`/teachers/${id}/status`, { status })
 }
 
 // ========== 课程相关 ==========
 
-export async function getCourses() {
-  return api.get('/courses')
-}
-
-export async function getEffectiveCourses(weekStart) {
-  const date = typeof weekStart === 'string' ? weekStart : weekStart.toISOString().slice(0, 10)
-  return api.get(`/courses/effective?weekStart=${date}`)
-}
-
-export async function getCourseHistory(id) {
-  return api.get(`/courses/${id}/history`)
-}
-
-export async function getCourseCurrentTemp(id, weekStart) {
-  const query = weekStart ? `?weekStart=${weekStart}` : ''
-  return api.get(`/courses/${id}/temp${query}`)
-}
-
-export async function saveCourses(courses) {
-  throw new Error('API 模式不支持批量保存')
+export async function getCourses({ includeArchived = false } = {}) {
+  return api.get(`/courses${includeArchived ? '?includeArchived=1' : ''}`)
 }
 
 export async function addCourse(course) {
-  await api.post('/courses', course)
-  return api.get('/courses')
+  return api.post('/courses', course)
 }
 
 export async function updateCourse(id, updates) {
-  // 即改即用：cascading 改动立即生效（后端自动用 today 作为 effective_from）；
-  // 临时覆盖通过 applyTemp + tempWeekStart 传参。
-  await api.put(`/courses/${id}`, updates)
-  return api.get('/courses')
-}
-
-export async function softDeleteCourse(id) {
-  await api.del(`/courses/${id}/status`)
-  return api.get('/courses')
+  return api.put(`/courses/${id}`, updates)
 }
 
 export async function deleteCourse(id) {
-  await api.del(`/courses/${id}`)
-  return api.get('/courses')
+  return api.del(`/courses/${id}`)
 }
+
+export async function getCourseOccurrences(start, end) {
+  return api.get(`/courses/occurrences?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`)
+}
+
+export async function rescheduleCourse(id, changes) {
+  return api.post(`/courses/${id}/reschedule`, changes)
+}
+
+export async function rescheduleCourseDay(changes) {
+  return api.post('/courses/reschedule-day', changes)
+}
+
+export async function getTrialBookings(filters = {}) {
+  const bookings = []
+  while (true) {
+    const query = new URLSearchParams(Object.entries({ ...filters, limit: 500, offset: bookings.length })
+      .filter(([, value]) => value !== '' && value !== null && value !== undefined))
+    const page = await api.get(`/trial-bookings?${query}`)
+    bookings.push(...page)
+    if (page.length < 500) return bookings
+  }
+}
+
+export async function addTrialBooking(data) { return api.post('/trial-bookings', data) }
+export async function updateTrialBooking(id, data) { return api.put(`/trial-bookings/${id}`, data) }
+export async function cancelTrialBooking(id) { return api.post(`/trial-bookings/${id}/cancel`, {}) }
 
 // ========== 点名记录相关 ==========
 
@@ -142,8 +133,27 @@ export async function getAttendance({ limit, offset } = {}) {
   return result.data || result
 }
 
-export async function getAttendancePage({ limit = 50, offset = 0 } = {}) {
-  const result = await api.get(`/attendance?limit=${limit}&offset=${offset}`)
+// 日历与工作台需要完整记录；点名管理页仍使用分页接口。
+export async function getAllAttendance(filters = {}) {
+  const records = []
+  let offset = 0
+  while (true) {
+    const page = await getAttendancePage({ ...filters, limit: 200, offset })
+    records.push(...(page.data || []))
+    if (!page.hasMore || !page.data?.length) return records
+    offset += page.data.length
+  }
+}
+
+export async function getAttendancePage({ limit = 50, offset = 0, includeVoided = false, courseId, month, date, originalDate, scope } = {}) {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (includeVoided) query.set('includeVoided', '1')
+  if (courseId) query.set('courseId', courseId)
+  if (month) query.set('month', month)
+  if (date) query.set('date', date)
+  if (originalDate) query.set('originalDate', originalDate)
+  if (scope === 'mine') query.set('scope', scope)
+  const result = await api.get(`/attendance?${query}`)
   if (Array.isArray(result)) return { data: result, hasMore: false }
   return result
 }
@@ -176,10 +186,7 @@ export async function deleteAttendance(attendanceId) {
 }
 
 export async function removeStudentsFromRecord(attendanceId, studentIdsToRemove) {
-  await api.post(`/attendance/${attendanceId}/remove-students`, { studentIds: studentIdsToRemove })
-  const result = await api.get('/attendance?limit=50')
-  if (Array.isArray(result)) return result
-  return result.data || result
+  return api.post(`/attendance/${attendanceId}/remove-students`, { studentIds: studentIdsToRemove })
 }
 
 // ========== 课时记录相关 ==========
@@ -193,88 +200,63 @@ export async function saveHourRecords(records) {
 }
 
 export async function addHourRecord(record) {
-  return api.post('/hour-records', record)
+  throw new Error('请通过学生课时操作或正式课程点名生成课时记录')
 }
 
 export async function getHourRecordsByStudent(studentId) {
-  const result = await api.get(`/hour-records?studentId=${studentId}&limit=500`)
-  if (Array.isArray(result)) return result
-  return result.data || result
-}
-
-// ========== 班级管理 ==========
-
-export async function getClasses() {
-  return api.get('/classes')
-}
-
-export async function saveClasses(classes) {
-  throw new Error('API 模式不支持批量保存')
-}
-
-export async function addClass(cls) {
-  await api.post('/classes', cls)
-  return api.get('/classes')
-}
-
-export async function updateClass(id, updates) {
-  await api.put(`/classes/${id}`, updates)
-  return api.get('/classes')
-}
-
-export async function deleteClass(id) {
-  await api.del(`/classes/${id}`)
-  return api.get('/classes')
-}
-
-export async function getClassName(classId) {
-  if (!classId) return ''
-  const classes = await api.get('/classes')
-  const cls = classes.find(c => c.id === classId)
-  return cls ? cls.name : ''
+  const records = []
+  for (let offset = 0; ; offset += 500) {
+    const result = await api.get(`/hour-records?studentId=${encodeURIComponent(studentId)}&limit=500&offset=${offset}`)
+    if (Array.isArray(result)) return result
+    records.push(...result.data)
+    if (!result.hasMore) return records
+  }
 }
 
 // ========== 数据备份与恢复 ==========
 
 export async function exportData() {
   const token = localStorage.getItem('access_token')
-  const resp = await fetch('/edusystem/api/backup/export', {
+  const resp = await fetch(apiUrl('/backup/export'), {
     headers: { 'Authorization': `Bearer ${token}` }
   })
   if (resp.status === 401) {
     const refreshed = await api.tryRefresh()
     if (refreshed) {
-      const retryResp = await fetch('/edusystem/api/backup/export', {
+      const retryResp = await fetch(apiUrl('/backup/export'), {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('access_token')}` }
       })
+      if (!retryResp.ok) throw new Error('导出失败，请重新登录或稍后重试')
       return await retryResp.text()
     }
   }
+  if (!resp.ok) throw new Error('导出失败，请重新登录或稍后重试')
   return await resp.text()
 }
 
 export async function importData(fileContent) {
   try {
-    if (fileContent.trim().startsWith('--')) {
+    const content = fileContent.replace(/^\uFEFF/, '').trimStart()
+    if (!content.startsWith('{')) {
       const token = localStorage.getItem('access_token')
-      let resp = await fetch('/edusystem/api/backup/import-sql', {
+      let resp = await fetch(apiUrl('/backup/import-sql'), {
         method: 'POST',
         headers: {
           'Content-Type': 'text/plain',
           'Authorization': `Bearer ${token}`
         },
-        body: fileContent
+        body: content
       })
       if (resp.status === 401) {
         const refreshed = await api.tryRefresh()
         if (refreshed) {
-          resp = await fetch('/edusystem/api/backup/import-sql', {
+          resp = await fetch(apiUrl('/backup/import-sql'), {
             method: 'POST',
             headers: {
               'Content-Type': 'text/plain',
               'Authorization': `Bearer ${localStorage.getItem('access_token')}`
             },
-            body: fileContent
+            body: content
           })
         }
       }
@@ -284,11 +266,11 @@ export async function importData(fileContent) {
       }
       return await resp.json()
     }
-    const importObj = JSON.parse(fileContent)
+    const importObj = JSON.parse(content)
     if (!importObj.data) {
       return { success: false, message: '无效的备份文件格式' }
     }
-    const result = await api.post('/backup/import', importObj.data)
+    const result = await api.post('/backup/import', importObj)
     return result
   } catch (err) {
     return { success: false, message: '数据导入失败：' + err.message }
@@ -309,18 +291,8 @@ export async function downloadBackup() {
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
   } catch (error) {
-    console.error('导出失败:', error)
+    throw error
   }
-}
-
-// ========== 工具函数 ==========
-
-export async function getStorePath() {
-  return '远程数据库 (MySQL)'
-}
-
-export function checkIsElectron() {
-  return typeof window !== 'undefined' && window.location.protocol === 'file:'
 }
 
 // ========== 统计相关 ==========
@@ -329,20 +301,20 @@ function toLocalDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export async function getTeacherStats(startDate, endDate) {
+export async function getTeacherStats(startDate, endDate, scope = 'all') {
   const start = toLocalDate(startDate)
   const end = toLocalDate(endDate)
-  return api.get(`/stats/teachers?start=${start}&end=${end}`)
+  return api.get(`/stats/teachers?start=${start}&end=${end}&scope=${scope}`)
 }
 
-export async function getWeekdayDistribution() {
-  return api.get('/stats/weekday-distribution')
+export async function getWeekdayDistribution(start, end, scope = 'all') {
+  return api.get(`/stats/weekday-distribution?start=${toLocalDate(start)}&end=${toLocalDate(end)}&scope=${scope}`)
 }
 
-export async function getOverallStats(startDate, endDate) {
+export async function getOverallStats(startDate, endDate, scope = 'all') {
   const start = toLocalDate(startDate)
   const end = toLocalDate(endDate)
-  return api.get(`/stats/overall?start=${start}&end=${end}`)
+  return api.get(`/stats/overall?start=${start}&end=${end}&scope=${scope}`)
 }
 
 export function getDateRange(preset) {
@@ -382,8 +354,7 @@ export async function getHandoverHistory(courseId) {
   return api.get(`/handovers${params}`)
 }
 
-// ========== 初始化 ==========
-
-export async function initStorage() {
-  // API 模式无需初始化
-}
+export const getScheduleAdjustments = id => api.get(`/courses/${id}/adjustments`)
+export const removeScheduleAdjustment = (id, kind, changeId) => api.del(`/courses/${id}/adjustments/${kind}/${changeId}`)
+export const arrangeSubstitution = (id, data) => api.post(`/courses/${id}/substitution`, data)
+export const cancelSubstitution = (id, originalDate) => api.del(`/courses/${id}/substitution/${originalDate}`)
