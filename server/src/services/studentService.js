@@ -251,6 +251,30 @@ export async function remove(id) {
   }
 }
 
+export async function restore(id, teacherScope = null) {
+  const conn = await pool.getConnection()
+  let locked = false
+  try {
+    await acquireScheduleLock(conn)
+    locked = true
+    await conn.beginTransaction()
+    const [[student]] = await conn.execute('SELECT * FROM students WHERE id = ? FOR UPDATE', [id])
+    if (!student) throw Object.assign(new Error('学生不存在'), { status: 404 })
+    if (teacherScope && student.creator_id !== teacherScope) throw Object.assign(new Error('只能恢复自己录入的学生'), { status: 403 })
+    if (student.status !== 'deleted') throw Object.assign(new Error('该学生未归档，无需恢复'), { status: 400 })
+    await conn.execute("UPDATE students SET status = 'active' WHERE id = ?", [id])
+    const [[restored]] = await conn.execute('SELECT * FROM students WHERE id = ?', [id])
+    const result = formatStudent(restored)
+    await conn.commit()
+    return result
+  } catch (error) {
+    await conn.rollback()
+    throw error
+  } finally {
+    await closeScheduleConnection(conn, locked)
+  }
+}
+
 export async function checkNameExists(name, excludeId) {
   name = String(name ?? '').trim()
   if (!name) return false

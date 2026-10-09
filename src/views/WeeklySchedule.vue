@@ -118,9 +118,14 @@
         <template v-if="selectedItem.type === 'course'">
           <div class="detail-section"><h3>课程资料</h3>
             <template v-if="canEdit(selectedItem) && !isPast(selectedItem)">
-              <label>课程名称 <OfficeInput v-model.trim="courseEdit.name" class="detail-input" type="text" maxlength="200" /></label>
-              <label>教室 <OfficeInput v-model.trim="courseEdit.classroom" class="detail-input" type="text" maxlength="100" /></label>
-              <label>每次课时 <OfficeInput v-model.number="courseEdit.hoursPerClass" class="detail-input" type="number" min="0.5" max="999.5" step="0.5" /></label>
+              <p v-if="loadingCourseEdit" class="hint">正在加载最新课程资料…</p>
+              <p v-if="courseEditError" class="course-warning">{{ courseEditError }} <NButton size="small" @click="openItem(selectedItem, true)">重试</NButton></p>
+              <label>课程名称 <OfficeInput v-model.trim="courseEdit.name" class="detail-input" type="text" maxlength="200" :disabled="loadingCourseEdit || !!courseEditError" /></label>
+              <label>教室 <OfficeInput v-model.trim="courseEdit.classroom" class="detail-input" type="text" maxlength="100" :disabled="loadingCourseEdit || !!courseEditError" /></label>
+              <label>每次课时 <OfficeInput v-model.number="courseEdit.hoursPerClass" class="detail-input" type="number" min="0.5" max="999.5" step="0.5" :disabled="loadingCourseEdit || !!courseEditError" /></label>
+              <label>开始时间 <NSelect v-model:value="courseEdit.startTime" :options="timeOptions" :disabled="loadingCourseEdit || !!courseEditError" /></label>
+              <label>结束时间 <OfficeInput :model-value="editEndTime" class="detail-input" type="text" readonly placeholder="根据开始时间和课时自动计算" /></label>
+              <p class="hint">0.5 课时为 30 分钟，结束时间自动计算。资料中的时间修改应用于后续每周课程。</p>
             </template>
             <p v-else>{{ selectedItem.classroom || '未设置教室' }} · 每次 {{ selectedItem.hoursPerClass ?? 1 }} 课时</p>
           </div>
@@ -133,8 +138,9 @@
           </div>
           <div v-if="canEdit(selectedItem) && !isPast(selectedItem)" class="detail-section">
             <h3>调整正式学生名单</h3>
-            <NSelect v-model:value="rosterIds" :options="activeStudentOptions" multiple filterable placeholder="选择学生" />
-            <NButton size="small" type="primary" :loading="savingRoster" @click="saveCourseDetails">保存课程资料与名单</NButton>
+            <p v-if="excludedRosterStudents.length" class="hint">本次名单已移除：{{ excludedRosterStudents.join('、') }}。保存后历史课次保留原名单；如需重新加入，请先到学生管理恢复并确认报名。</p>
+            <NSelect v-model:value="rosterIds" :options="activeStudentOptions" multiple filterable placeholder="选择学生" :disabled="loadingCourseEdit || !!courseEditError" />
+            <NButton size="small" type="primary" :loading="savingRoster" :disabled="loadingCourseEdit || !!courseEditError" @click="saveCourseDetails">保存课程资料与名单</NButton>
           </div>
         </template>
         <template v-else><div class="detail-section"><h3>试听学生</h3><p>{{ selectedItem.studentName }}</p><p>{{ selectedItem.note }}</p><NButton @click="router.push({ path: '/trial-bookings', query: { date: selectedItem.date } })">查看预约</NButton></div></template>
@@ -163,9 +169,10 @@
         <label>授课教师 <NSelect v-model:value="createForm.teacherId" :options="createTeacherOptions" filterable placeholder="选择教师" /></label>
         <label>开始排课 <NSelect v-model:value="createForm.startWeek" :options="createWeekOptions" /></label>
         <label>上课星期 <NSelect v-model:value="createForm.weekday" :options="weekdayOptions" /></label>
-        <div class="move-times"><label>开始时间 <NSelect v-model:value="createForm.startTime" :options="timeOptions" /></label><label>结束时间 <NSelect v-model:value="createForm.endTime" :options="timeOptions" /></label></div>
+        <div class="move-times"><label>开始时间 <NSelect v-model:value="createForm.startTime" :options="timeOptions" /></label><label>结束时间 <OfficeInput :model-value="createEndTime" class="detail-input" type="text" readonly placeholder="根据开始时间和课时自动计算" /></label></div>
         <label>教室 <OfficeInput v-model.trim="createForm.classroom" class="detail-input" type="text" placeholder="可选" maxlength="100" /></label>
         <label>每次课时 <OfficeInput v-model.number="createForm.hoursPerClass" class="detail-input" type="number" min="0.5" max="999.5" step="0.5" /></label>
+        <p class="hint">结束时间＝开始时间＋课时，0.5 课时为 30 分钟。</p>
         <label>上课学生 <NSelect v-model:value="createForm.studentIds" :options="activeStudentOptions" multiple filterable placeholder="搜索并选择学生" /></label>
       </div>
       <template #footer><div class="detail-footer"><NButton @click="showCreate = false">取消</NButton><NButton type="primary" :loading="savingCreate" @click="saveCreate">创建课程</NButton></div></template>
@@ -193,7 +200,7 @@
 
     <NModal v-model:show="showDayMove" preset="card" class="move-modal" title="整天调课确认">
       <div class="move-body">
-        <p>把 {{ dayMove.sourceDate }} 的 {{ dayMoveCourses.length }} 节正式课程整体移到新日期，保留每节课的原开始时间和时长。</p>
+        <p>把 {{ dayMove.sourceDate }} 的 {{ dayMoveCourses.length }} 节正式课程整体移到新日期，保留每节课的开始时间和课时，结束时间自动计算。</p>
         <div class="day-move-list"><div v-for="item in dayMoveCourses" :key="item.id">{{ item.startTime }}—{{ item.endTime }} · {{ item.name }} · {{ item.teacherName }}</div></div>
         <label>新日期 <OfficeDatePicker v-model="dayMove.targetDate" :min="moveMinDate" :max="moveMaxDate" /></label>
         <label>请选择整批调整范围（必选）</label>
@@ -219,6 +226,8 @@ import { getCourseOccurrences, getTrialBookings, getStudents, getTeachers, addCo
 import SubstitutionModal from '../components/SubstitutionModal.vue'
 import { useAuthStore } from '../stores/auth.js'
 import { useToast } from '../composables/useToast.js'
+import { courseEndTime } from '../../shared/courseTime.js'
+import { courseStudentLabel, prepareCourseRoster } from '../utils/courseRoster.js'
 
 const SLOT_PX = 24
 const START_MIN = 450
@@ -255,12 +264,17 @@ const showOverlap = ref(false)
 const overlapChoices = ref([])
 const viewportWidth = ref(window.innerWidth)
 const rosterIds = ref([])
+const excludedRosterStudents = ref([])
 const savingRoster = ref(false)
-const courseEdit = ref({ name: '', classroom: '', hoursPerClass: 1 })
+const courseEdit = ref({ name: '', classroom: '', startTime: '09:00', hoursPerClass: 1 })
+const loadingCourseEdit = ref(false)
+const courseEditError = ref('')
 const showCreate = ref(false)
 let createRequest = 0
 const savingCreate = ref(false)
-const createForm = ref({ name: '', teacherId: null, startWeek: '', weekday: 1, startTime: '09:00', endTime: '11:00', classroom: '', hoursPerClass: 1, studentIds: [] })
+const createForm = ref({ name: '', teacherId: null, startWeek: '', weekday: 1, startTime: '09:00', classroom: '', hoursPerClass: 1, studentIds: [] })
+const createEndTime = computed(() => courseEndTime(createForm.value.startTime, createForm.value.hoursPerClass))
+const editEndTime = computed(() => courseEndTime(courseEdit.value.startTime, courseEdit.value.hoursPerClass))
 const showMove = ref(false)
 let moveRequest = 0
 const savingMove = ref(false)
@@ -293,7 +307,8 @@ const createWeekOptions = computed(() => weekGroups.value.map((week, index) => (
 function displayedWeek(date) { return weekGroups.value.find(week => date >= week.start && date <= week.end) }
 const moveMinDate = computed(() => [today.value, weekGroups.value[0].start].sort().at(-1))
 const moveMaxDate = computed(() => weekGroups.value[1].end)
-const dayMoveCourses = computed(() => (itemsByDate.value[dayMove.value.sourceDate] || []).filter(item => canEdit(item)))
+const dayMoveCourses = computed(() => (itemsByDate.value[dayMove.value.sourceDate] || []).filter(item => canEdit(item))
+  .map(item => ({ ...item, endTime: courseEndTime(item.startTime, item.hoursPerClass ?? 1) })))
 const hasPastDayCourse = computed(() => dayMoveCourses.value.some(isPast))
 const rulerTimes = Array.from({ length: 31 }, (_, i) => formatMinutes(START_MIN + i * 30))
 const timeOptions = rulerTimes.map(time => ({ label: time, value: time }))
@@ -307,7 +322,7 @@ const createPrerequisite = computed(() => {
 })
 function formatMinutes(n) { return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}` }
 function minutes(time) { return Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5)) }
-function studentName(id) { return students.value.find(s => s.id === id)?.name || '已归档学生' }
+function studentName(id) { return courseStudentLabel(students.value.find(s => s.id === id)) }
 function paletteStyle(id) { return teacherStyle(id, teachers.value) }
 function isPast(item) { return new Date(`${item.date}T${item.startTime}:00`).getTime() <= Math.max(nowTick.value, Date.now()) }
 function canEdit(item) { return item.type === 'course' && (auth.isAdmin || !!auth.teacherId && auth.teacherId === (item.ownerTeacherId || item.teacherId)) }
@@ -380,6 +395,7 @@ const dropPreviews = computed(() => {
   if (!drag.value.target) return []
   if (drag.value.item) return [{ ...drag.value.item, ...drag.value.target }]
   return (itemsByDate.value[pointerOrigin?.sourceDate] || []).filter(canEdit)
+    .map(item => ({ ...item, endTime: courseEndTime(item.startTime, item.hoursPerClass ?? 1) }))
 })
 const relatedTrials = computed(() => selectedItem.value?.type === 'course'
   ? bookings.value.filter(b => b.status === 'active' && b.courseId === selectedItem.value.courseId && b.occurrenceDate === selectedItem.value.originalDate)
@@ -456,15 +472,33 @@ async function openItem(item, chosen = false) {
   }
   const request = ++detailRequest
   selectedItem.value = item
-  rosterIds.value = [...(item.studentIds || [])]
-  courseEdit.value = { name: item.name, classroom: item.classroom || '', hoursPerClass: item.hoursPerClass ?? 1 }
+  const roster = prepareCourseRoster(item.studentIds, students.value)
+  rosterIds.value = roster.studentIds
+  excludedRosterStudents.value = roster.excluded
+  courseEdit.value = { name: item.name, classroom: item.classroom || '', startTime: item.startTime, hoursPerClass: item.hoursPerClass ?? 1 }
   showDetail.value = true
   adjustments.value = { once: [], future: [] }
+  courseEditError.value = ''
+  loadingCourseEdit.value = false
   if (item.type === 'course' && canEdit(item)) {
+    loadingCourseEdit.value = true
     try {
       const nextAdjustments = await getScheduleAdjustments(item.courseId)
-      if (request === detailRequest && showDetail.value) adjustments.value = nextAdjustments
-    } catch (error) { if (request === detailRequest && showDetail.value) toast.error(error.message) }
+      if (request === detailRequest && showDetail.value) {
+        const current = nextAdjustments.course
+        if (current === null || current?.archivedAt) throw new Error('该课程不存在或已归档')
+        if (current && !auth.isAdmin && current.teacherId !== auth.teacherId) throw new Error('该课程已移交，无法编辑')
+        adjustments.value = nextAdjustments
+        if (current) {
+          courseEdit.value = { name: current.name, classroom: current.classroom || '', startTime: current.upcomingSchedule?.startTime ?? current.startTime, hoursPerClass: current.hoursPerClass ?? 1 }
+          const currentRoster = prepareCourseRoster(current.studentIds, students.value)
+          rosterIds.value = currentRoster.studentIds
+          excludedRosterStudents.value = currentRoster.excluded
+        }
+      }
+    } catch (error) {
+      if (request === detailRequest && showDetail.value) { courseEditError.value = error.message || '课程资料加载失败'; toast.error(courseEditError.value) }
+    } finally { if (request === detailRequest) loadingCourseEdit.value = false }
   }
 }
 function selectOverlapItem(item) { showOverlap.value = false; openItem(item, true) }
@@ -486,14 +520,18 @@ async function removeSubstitution() {
   finally { cancellingSubstitution.value = false }
 }
 async function saveCourseDetails() {
-  if (savingRoster.value) return
+  if (savingRoster.value || loadingCourseEdit.value || courseEditError.value) return
   if (!selectedItem.value || !canEdit(selectedItem.value) || isPast(selectedItem.value)) return
+  const roster = prepareCourseRoster(rosterIds.value, students.value)
+  rosterIds.value = roster.studentIds
+  excludedRosterStudents.value = [...new Set([...excludedRosterStudents.value, ...roster.excluded])]
   if (!courseEdit.value.name?.trim()) return toast.error('请输入课程名称')
   if (!Number.isFinite(Number(courseEdit.value.hoursPerClass)) || Number(courseEdit.value.hoursPerClass) < 0.5 || Number(courseEdit.value.hoursPerClass) > 999.5 || Number(courseEdit.value.hoursPerClass) % 0.5 !== 0) return toast.error('每次课时须为 0.5 至 999.5 的半课时倍数')
   if (!rosterIds.value.length) return toast.error('请至少选择一名正式学生')
+  if (!editEndTime.value) return toast.error('请检查开始时间和课时，结束时间不能晚于22:30')
   const request = detailRequest
   const courseId = selectedItem.value.courseId
-  const changes = { ...courseEdit.value, studentIds: [...rosterIds.value] }
+  const changes = { ...courseEdit.value, endTime: editEndTime.value, studentIds: [...rosterIds.value] }
   savingRoster.value = true
   try {
     await updateCourse(courseId, changes)
@@ -514,7 +552,7 @@ function openCreate(startWeek = null) {
   if (startWeek === displayedWeek(today.value)?.start && selectedDay.value < today.value) day = atNoon(today.value).getDay()
   createRequest++
   createForm.value = { name: '', teacherId: auth.teacherId || createTeacherOptions.value[0]?.value || null,
-    startWeek, weekday: day || 7, startTime: '09:00', endTime: '11:00', classroom: '', hoursPerClass: 1, studentIds: [] }
+    startWeek, weekday: day || 7, startTime: '09:00', classroom: '', hoursPerClass: 1, studentIds: [] }
   showCreate.value = true
 }
 function openCreateOnDay(date) { selectedDay.value = date; openCreate(displayedWeek(date)?.start) }
@@ -525,12 +563,12 @@ async function saveCreate() {
   if (!form.name?.trim()) return toast.error('请输入课程名称')
   if (!form.teacherId) return toast.error('请选择授课教师')
   if (!form.studentIds?.length) return toast.error('请至少选择一名学生')
-  if (!form.startTime || !form.endTime || form.startTime >= form.endTime) return toast.error('结束时间必须晚于开始时间')
   if (!Number.isFinite(Number(form.hoursPerClass)) || Number(form.hoursPerClass) < 0.5 || Number(form.hoursPerClass) > 999.5 || Number(form.hoursPerClass) % 0.5 !== 0) return toast.error('每次课时须为 0.5 至 999.5 的半课时倍数')
+  if (!createEndTime.value) return toast.error('请检查开始时间和课时，结束时间不能晚于22:30')
   if (!weekGroups.value.some(week => week.start === form.startWeek && week.end >= today.value)) return toast.error('请选择当前或未来的一周')
   savingCreate.value = true
   try {
-    await addCourse({ ...form, effectiveStartDate: form.startWeek > today.value ? form.startWeek : undefined })
+    await addCourse({ ...form, endTime: createEndTime.value, effectiveStartDate: form.startWeek > today.value ? form.startWeek : undefined })
     if (request === createRequest) showCreate.value = false
     toast.success('课程已创建')
     await refreshWeekAfterWrite('课程已创建')
@@ -538,18 +576,17 @@ async function saveCreate() {
   catch (error) { toast.error(error.message || '创建课程失败') }
   finally { savingCreate.value = false }
 }
-function openMove(item, targetDate = item.date, startTime = item.startTime, endTime = item.endTime) {
+function openMove(item, targetDate = item.date, startTime = item.startTime) {
   if (!canEdit(item) || isPast(item)) return
   moveRequest++
-  move.value = { item, targetDate, startTime, endTime, scope: null }
+  move.value = { item, targetDate, startTime, endTime: courseEndTime(startTime, item.hoursPerClass ?? 1), scope: null }
   showDetail.value = false
   showMove.value = true
 }
 function editSelected() { openMove(selectedItem.value) }
 function keepDuration(value) {
   if (!move.value.item) return
-  const length = minutes(move.value.item.endTime) - minutes(move.value.item.startTime)
-  move.value.endTime = formatMinutes(minutes(value) + length)
+  move.value.endTime = courseEndTime(value, move.value.item.hoursPerClass ?? 1)
 }
 function keepWithinWeek() {
   if (move.value.targetDate < moveMinDate.value || move.value.targetDate > moveMaxDate.value) {
@@ -563,7 +600,7 @@ async function saveMove() {
   if (m.item && isPast(m.item)) return toast.error('这节课已开始，不能再调课')
   if (!['once', 'future'].includes(m.scope)) return toast.error('请先选择调课范围')
   if (!m.item || !m.targetDate || !m.startTime || !m.endTime || m.startTime >= m.endTime ||
-      minutes(m.endTime) - minutes(m.startTime) !== minutes(m.item.endTime) - minutes(m.item.startTime)) return toast.error('请保持原课程时长')
+      m.endTime !== courseEndTime(m.startTime, m.item.hoursPerClass ?? 1)) return toast.error('请检查开始时间和课时，结束时间不能晚于22:30')
   if (m.targetDate < moveMinDate.value || m.targetDate > moveMaxDate.value) return toast.error('仅可在当前显示的两周内调整')
   if (m.scope === 'future' && displayedWeek(m.targetDate)?.start !== displayedWeek(m.item.date)?.start &&
       displayedWeek(m.targetDate)?.start !== addDays(displayedWeek(m.item.date)?.start, 7)) return toast.error('跨周永久调课只可从下一周开始')
@@ -658,7 +695,7 @@ function onPointerMove(event) {
   if (!lane) { drag.value.target = null; drag.value.preview = '移至两周内的日期'; return }
   const slot = Math.floor((event.clientY - lane.getBoundingClientRect().top) / SLOT_PX)
   const startMinute = START_MIN + slot * 30
-  const duration = minutes(pointerOrigin.item.endTime) - minutes(pointerOrigin.item.startTime)
+  const duration = Number(pointerOrigin.item.hoursPerClass ?? 1) * 60
   const date = lane.dataset.date
   if (slot < 0 || startMinute + duration > END_MIN || new Date(`${date}T${formatMinutes(startMinute)}:00`) < new Date()) {
     drag.value.target = null; drag.value.preview = '此时段不可用'; return
@@ -674,7 +711,7 @@ function endPointer(event) {
     setTimeout(() => { suppressClick = false }, 120)
     if (drag.value.active && drag.value.target) {
       if (pointerOrigin.sourceDate) openDayMove(pointerOrigin.sourceDate, drag.value.target.date)
-      else openMove(pointerOrigin.item, drag.value.target.date, drag.value.target.startTime, drag.value.target.endTime)
+      else openMove(pointerOrigin.item, drag.value.target.date, drag.value.target.startTime)
     }
   }
   cleanupPointer()

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import mysql from 'mysql2/promise'
+import { mock } from 'node:test'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 dotenv.config({ path: path.join(root, '.env') })
@@ -369,7 +370,9 @@ try {
   }
   const editedHalf = await course.update(halfCourse.id, { name: '半课时资料改动', classroom: 'A101', hoursPerClass: 1.5 }, 't1')
   assert.deepEqual([editedHalf.weekday, editedHalf.startTime, editedHalf.endTime, editedHalf.hoursPerClass, editedHalf.classroom], [5, '17:00', '17:30', 1.5, 'A101'])
-  await assert.rejects(() => course.update(halfCourse.id, { startTime: '16:00' }, 't1'), /周排课/)
+  await course.update(halfCourse.id, { startTime: '16:00' }, 't1')
+  const editedSlot = (await schedule.listOccurrences(halfDate, halfDate)).find(row => row.courseId === halfCourse.id)
+  assert.deepEqual([editedSlot.startTime, editedSlot.endTime, editedSlot.hoursPerClass], ['16:00', '17:30', 1.5])
   await course.remove(oneHalfCourse.id, 't1')
   const [[archivedDecimal]] = await pool.execute('SELECT archived_at FROM courses WHERE id = ?', [oneHalfCourse.id])
   const [[retainedDecimalAttendance]] = await pool.execute('SELECT COUNT(*) AS total FROM attendance WHERE course_id = ?', [oneHalfCourse.id])
@@ -427,6 +430,61 @@ try {
   await course.remove(one.id)
   const [archived] = await pool.execute('SELECT archived_at FROM courses WHERE id = ?', [one.id])
   assert.ok(archived[0].archived_at)
+  await pool.execute("INSERT INTO teachers (id,name,status) VALUES ('same-day-teacher','当天老师','active')")
+  await pool.execute("INSERT INTO students (id,name,total_hours,enrollment_stage) VALUES ('same-day-student','当天学生',20,'enrolled')")
+  const today = schedule.iso(new Date())
+  const todayWeekday = new Date().getDay() || 7
+  mock.timers.enable({ apis: ['Date'], now: new Date(`${today}T23:00:00`) })
+  try {
+    const sameDay = await course.create({ name: '当天课后录入', teacherId: 'same-day-teacher', weekday: todayWeekday,
+      startTime: '09:00', endTime: '21:00', hoursPerClass: 1.5, studentIds: ['same-day-student'] })
+    assert.equal(sameDay.effectiveStartDate, today)
+    assert.equal(sameDay.endTime, '10:30')
+    const todayRows = await schedule.listOccurrences(today, today)
+    assert.ok(todayRows.some(row => row.courseId === sameDay.id))
+    const sameDayRecord = await attendance.create({ courseId: sameDay.id, date: today, studentIds: ['same-day-student'] }, null, { username: 'test-admin' })
+    assert.equal(sameDayRecord.hoursDeducted, 1.5)
+    const blocker = await course.create({ name: '结束时间冲突验证', teacherId: 'same-day-teacher', weekday: todayWeekday,
+      startTime: '12:00', hoursPerClass: 1, studentIds: ['same-day-student'] })
+    await assert.rejects(course.update(sameDay.id, { startTime: '11:00', hoursPerClass: 2 }), /冲突/)
+    assert.equal((await course.getById(sameDay.id)).hoursPerClass, 1.5)
+    assert.equal((await schedule.getAdjustments(sameDay.id)).future.length, 0)
+    await course.remove(blocker.id)
+    const edited = await course.update(sameDay.id, { startTime: '11:00', endTime: '22:00', hoursPerClass: 2 })
+    const nextDate = schedule.addDays(today, 7)
+    assert.equal(edited.timeChange.effectiveDate, nextDate)
+    assert.equal(edited.upcomingSchedule.startTime, '11:00')
+    const earlier = (await schedule.listOccurrences(today, today)).find(row => row.courseId === sameDay.id)
+    const next = (await schedule.listOccurrences(nextDate, nextDate)).find(row => row.courseId === sameDay.id)
+    assert.deepEqual([earlier.startTime, earlier.endTime, earlier.hoursPerClass], ['09:00', '10:30', 1.5])
+    assert.deepEqual([next.startTime, next.endTime, next.hoursPerClass], ['11:00', '13:00', 2])
+    mock.timers.setTime(new Date(`${today}T08:00:00`).getTime())
+    await course.update(sameDay.id, { startTime: '13:00', hoursPerClass: 0.5 })
+    const revised = (await schedule.listOccurrences(nextDate, nextDate)).find(row => row.courseId === sameDay.id)
+    assert.deepEqual([revised.startTime, revised.endTime, revised.hoursPerClass], ['13:00', '13:30', 0.5])
+    await course.update(sameDay.id, { startTime: '08:00', hoursPerClass: 1 })
+    for (const date of [nextDate, schedule.addDays(nextDate, 7)]) {
+      const advanced = (await schedule.listOccurrences(date, date)).find(row => row.courseId === sameDay.id)
+      assert.deepEqual([advanced.startTime, advanced.endTime, advanced.hoursPerClass], ['08:00', '09:00', 1])
+    }
+    await course.update(sameDay.id, { startTime: '07:30', hoursPerClass: 1 })
+    const advancedAgain = (await schedule.listOccurrences(nextDate, nextDate)).find(row => row.courseId === sameDay.id)
+    assert.deepEqual([advancedAgain.startTime, advancedAgain.endTime, advancedAgain.hoursPerClass], ['07:30', '08:30', 1])
+    mock.timers.setTime(new Date(`${today}T23:00:00`).getTime())
+    const pendingTime = (await schedule.getAdjustments(sameDay.id)).future[0]
+    await schedule.removeAdjustment(sameDay.id, 'future', pendingTime.id)
+    const restoredTime = (await schedule.listOccurrences(nextDate, nextDate)).find(row => row.courseId === sameDay.id)
+    assert.deepEqual([restoredTime.startTime, restoredTime.endTime, restoredTime.hoursPerClass], ['09:00', '10:30', 1.5])
+    assert.equal((await course.getById(sameDay.id)).hoursPerClass, 1.5)
+    const [[balance]] = await pool.execute('SELECT used_hours FROM students WHERE id = ?', ['same-day-student'])
+    assert.equal(Number(balance.used_hours), 1.5)
+    await course.remove(sameDay.id)
+    const [[retained]] = await pool.execute('SELECT archived_at FROM courses WHERE id = ?', [sameDay.id])
+    const [[history]] = await pool.execute('SELECT id FROM attendance WHERE id = ?', [sameDayRecord.id])
+    assert.ok(retained.archived_at)
+    assert.equal(history.id, sameDayRecord.id)
+    console.log('当天建课与点名、自动结束时间、每周时间编辑、冲突回滚和归档历史保留通过')
+  } finally { mock.timers.reset() }
   await student.verifyAccess('p1', 't1')
   await assert.rejects(() => student.verifyDeleteAccess('p1', 't2'), /只能修改/)
   await student.remove('p1')

@@ -2,7 +2,12 @@
   <Transition name="toast">
     <div class="toast" v-if="state.visible" :class="state.type">
       <span class="toast-icon">{{ iconMap[state.type] }}</span>
-      <span class="toast-message">{{ state.message }}</span><button aria-label="关闭提示" @click="state.visible = false">×</button>
+      <span class="toast-message">{{ state.message }}</span>
+      <button class="toast-close" type="button" aria-label="关闭提示" title="关闭提示" @click="state.visible = false">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
     </div>
   </Transition>
 </template>
@@ -24,7 +29,7 @@ const iconMap = {
   top: 80px;
   left: 50%;
   transform: translateX(-50%);
-  padding: 14px 28px;
+  padding: 12px 16px;
   border-radius: var(--radius-md);
   font-size: 14px;
   font-weight: 500;
@@ -48,7 +53,40 @@ const iconMap = {
   font-weight: 700;
   flex-shrink: 0;
 }
-.toast-message { white-space: pre-line; text-align: left; }
+.toast-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.toast-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: var(--transition);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.toast-close:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.toast-close:active { background: var(--color-selected); }
+.toast-close:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.toast-close svg { pointer-events: none; }
 
 .toast.success {
   background: white;

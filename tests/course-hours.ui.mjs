@@ -53,6 +53,7 @@ try {
     await page.locator('.course-card').first().getByText('1.5 课时').waitFor()
     if (writes.length !== 1 || writes[0].method !== 'PUT' || writes[0].body.hoursPerClass !== 1.5) throw new Error(`${width}px: 编辑课程课时提交错误`)
 
+    for (const close of await page.locator('.toast .toast-close').all()) await close.click()
     await page.getByRole('button', { name: '创建课程' }).click()
     modal = page.locator('.modal').filter({ hasText: '创建课程' })
     await modal.getByPlaceholder('如：三年级数学提高班').fill('书法课')

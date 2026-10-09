@@ -1,5 +1,6 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
+import { courseEndTime } from '../../../shared/courseTime.js'
 
 const iso = value => value instanceof Date
   ? `${String(value.getFullYear()).padStart(4, '0')}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
@@ -68,9 +69,7 @@ export function firstFutureCourseDate(course, now = new Date()) {
   validateSlot(iso(now), course.startTime, course.endTime)
   const weekday = Number(course.weekday)
   if (!Number.isInteger(weekday) || weekday < 1 || weekday > 7) throw bad('星期无效')
-  let daysAhead = (weekday - (now.getDay() || 7) + 7) % 7
-  const timeNow = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-  if (daysAhead === 0 && course.startTime <= timeNow) daysAhead = 7
+  const daysAhead = (weekday - (now.getDay() || 7) + 7) % 7
   return addDays(iso(now), daysAhead)
 }
 
@@ -227,14 +226,13 @@ export async function assertRecurringAvailable(conn, candidate, ownCourseId = nu
   }
 }
 
-async function rescheduleInTransaction(conn, courseId, data, teacherScope) {
+async function rescheduleInTransaction(conn, courseId, data, teacherScope, editedHours = null) {
   const originalDate = data.originalDate
   const targetDate = data.targetDate
   const startTime = data.startTime
-  const endTime = data.endTime
   const scope = data.scope
   if (!['once', 'future'].includes(scope)) throw bad('请选择仅这一次或从这次起每周')
-  validateSlot(targetDate, startTime, endTime)
+  if (!validDate(targetDate)) throw bad('日期无效')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(originalDate || '') || iso(day(originalDate)) !== originalDate) throw bad('原上课日期无效')
   const week = weekStartOf(originalDate)
   const targetWeek = weekStartOf(targetDate)
@@ -250,7 +248,9 @@ async function rescheduleInTransaction(conn, courseId, data, teacherScope) {
     const state = await loadState(conn, firstWeek, addDays(lastWeek, 6))
     const current = occurrencesFromState(state, firstWeek, addDays(lastWeek, 6)).find(o => o.courseId === courseId && o.originalDate === originalDate)
     if (!current) throw bad('所选课次不存在')
-    if (minutes(endTime) - minutes(startTime) !== minutes(current.endTime) - minutes(current.startTime)) throw bad('调课须保持原课程时长')
+    const endTime = courseEndTime(startTime, editedHours ?? current.hoursPerClass)
+    if (!endTime) throw bad('请检查开始时间和课时，课程须在07:30至22:30之间')
+    validateSlot(targetDate, startTime, endTime)
     if (current.date === targetDate && current.startTime === startTime && current.endTime === endTime) throw bad('调课日期和时间未改变')
     const now = new Date()
     const sourceStart = new Date(`${current.date}T${current.startTime}:00`)
@@ -297,6 +297,24 @@ async function rescheduleInTransaction(conn, courseId, data, teacherScope) {
       )
     }
     return { courseId, originalDate, targetDate, startTime, endTime, scope }
+}
+
+export async function editRecurringTime(conn, course, startTime, hours, teacherScope) {
+  const now = new Date()
+  const nowText = sqlDateTime(now)
+  const from = [iso(now), course.effectiveStartDate || iso(now), course.upcomingSchedule?.effectiveWeekStart || iso(now)].sort().at(-1)
+  const endTime = courseEndTime(startTime, hours)
+  if (!endTime) throw bad('请检查开始时间和课时，课程须在07:30至22:30之间')
+  const state = await loadState(conn, from, addDays(from, 20))
+  const next = occurrencesFromState(state, from, addDays(from, 20)).find(row =>
+    row.courseId === course.id && `${row.date} ${row.startTime}:00` > nowText && `${row.date} ${startTime}:00` > nowText)
+  if (!next) throw bad('没有可调整的后续课程，请先检查周排课')
+  if (next.startTime !== startTime || next.endTime !== endTime) {
+    await rescheduleInTransaction(conn, course.id, {
+      originalDate: next.originalDate, targetDate: next.date, startTime, scope: 'future'
+    }, teacherScope, hours)
+  }
+  return { effectiveDate: next.date, startTime, endTime }
 }
 
 export async function reschedule(courseId, data, teacherScope) {
@@ -456,6 +474,17 @@ export async function removeAdjustment(courseId, kind, adjustmentId, teacherScop
     }
     await conn.execute(`DELETE FROM ${table} WHERE id = ?`, [adjustmentId])
     if (linked) await conn.execute(`DELETE FROM ${kind === 'once' ? 'course_schedule_versions' : 'course_occurrence_changes'} WHERE id = ?`, [linked.id])
+    if (futureRecord) {
+      // A not-yet-effective course edit stores its hours alongside this schedule period.
+      const [removedDetails] = await conn.execute(
+        `DELETE FROM course_detail_versions WHERE course_id = ? AND effective_at >= ? ${nextVersionStart ? 'AND effective_at < ?' : ''}`,
+        [courseId, `${iso(futureRecord.effective_week_start)} 00:00:00`, ...(nextVersionStart ? [`${nextVersionStart} 00:00:00`] : [])]
+      )
+      if (removedDetails.affectedRows) {
+        const [[latest]] = await conn.execute('SELECT name, classroom, hours_per_class FROM course_detail_versions WHERE course_id = ? ORDER BY effective_at DESC, id DESC LIMIT 1', [courseId])
+        if (latest) await conn.execute('UPDATE courses SET name = ?, classroom = ?, hours_per_class = ? WHERE id = ?', [latest.name, latest.classroom, latest.hours_per_class, courseId])
+      }
+    }
     const affectedWeeks = new Set([week])
     if (linked) affectedWeeks.add(weekStartOf(kind === 'once' ? record.target_date : linked.original_date))
     for (const affectedWeek of affectedWeeks) {
