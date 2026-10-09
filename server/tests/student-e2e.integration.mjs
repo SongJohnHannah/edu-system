@@ -58,7 +58,7 @@ try {
   }
   const login = await loginAs('isolated-student-admin', password)
   browser = await chromium.launch({ headless: true })
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Shanghai' })
   await context.addInitScript(data => {
     localStorage.setItem('access_token', data.accessToken)
     localStorage.setItem('refresh_token', data.refreshToken)
@@ -288,6 +288,36 @@ try {
   assert.equal(await historyPage.locator('.hours-history tbody tr').count(), 3)
   await historyPage.close()
 
+  const [[archivedStudent]] = await pool.execute('SELECT id, name, phone, total_hours, used_hours, enrollment_stage, remark, class_id FROM students WHERE id = ?', [student.id])
+  const deniedRestore = await fetch(`${base}/edusystem/api/students/${student.id}/restore`, {
+    method: 'POST', headers: { Authorization: `Bearer ${teacherLogin.accessToken}` }
+  })
+  assert.equal(deniedRestore.status, 403)
+  assert.equal((await pool.execute('SELECT status FROM students WHERE id = ?', [student.id]))[0][0].status, 'deleted')
+  await row.getByRole('button', { name: '恢复', exact: true }).click()
+  const restoreConfirm = page.locator('.modal').filter({ has: page.getByRole('heading', { name: '恢复学生', exact: true }) })
+  const restoredResponse = page.waitForResponse(response => response.url().endsWith(`/students/${student.id}/restore`))
+  await restoreConfirm.getByRole('button', { name: '确认', exact: true }).click()
+  assert.equal((await restoredResponse).status(), 200)
+  await restoreConfirm.waitFor({ state: 'hidden' })
+  await row.waitFor({ state: 'detached' })
+  const [[restoredStudent]] = await pool.execute('SELECT id, name, phone, total_hours, used_hours, enrollment_stage, remark, class_id FROM students WHERE id = ?', [student.id])
+  assert.deepEqual(restoredStudent, archivedStudent, '恢复须保留原学生信息和课时余额')
+  assert.equal((await pool.execute('SELECT status FROM students WHERE id = ?', [student.id]))[0][0].status, 'active')
+  assert.equal((await pool.execute('SELECT COUNT(*) AS total FROM hour_records WHERE student_id = ?', [student.id]))[0][0].total, 3)
+  await page.getByRole('button', { name: '隐藏归档', exact: true }).click()
+  await row.waitFor({ state: 'visible' })
+  await row.getByText('正常', { exact: true }).first().waitFor({ state: 'visible' })
+  await pool.execute("INSERT INTO students (id, name, status, created_by, creator_id, enrollment_stage, total_hours, used_hours) VALUES ('teacher-archived', '教师自己归档学生', 'deleted', 'teacher', 'teacher-1', 'enrolled', 20, 2)")
+  const ownRestored = await fetch(`${base}/edusystem/api/students/teacher-archived/restore`, {
+    method: 'POST', headers: { Authorization: `Bearer ${teacherLogin.accessToken}` }
+  })
+  assert.equal(ownRestored.status, 200)
+  const ownStudent = await ownRestored.json()
+  assert.equal(ownStudent.status, 'active')
+  assert.equal(ownStudent.totalHours, 20)
+  assert.equal(ownStudent.usedHours, 2)
+
   await pool.execute("INSERT INTO students (id, name, status, created_by, enrollment_stage) VALUES ('history-student', '历史学生', 'active', 'admin', 'enrolled')")
   await pool.execute(`INSERT INTO courses (id, name, teacher_id, weekday, start_time, end_time, student_ids, archived_at)
     VALUES ('history-course', '历史课程', 'teacher-1', 1, '09:00', '10:00', '["history-student"]', CURRENT_TIMESTAMP)`)
@@ -302,9 +332,64 @@ try {
   for (const value of [historicalAttendance.student_ids, historicalAttendance.original_student_ids]) {
     assert.deepEqual(typeof value === 'string' ? JSON.parse(value) : value, ['history-student'])
   }
+
+  const schedule = await import('../src/services/scheduleService.js')
+  const today = schedule.iso(new Date())
+  const priorDate = schedule.addDays(today, -7)
+  const nextDate = schedule.addDays(today, 7)
+  const weekday = new Date(`${today}T12:00:00`).getDay()
+  const oldIds = ['roster-active', 'history-student', 'missing-student']
+  const jsonIds = value => typeof value === 'string' ? JSON.parse(value) : value
+  await pool.execute("INSERT INTO students (id, name, status, created_by, enrollment_stage, total_hours) VALUES ('roster-active', '在读名单学生', 'active', 'admin', 'enrolled', 20)")
+  for (const [id, name, start, end] of [
+    ['legacy-roster', '管理旧名单课程', '09:00', '10:00'], ['weekly-roster', '周排课旧名单课程', '11:00', '12:00']
+  ]) {
+    await pool.execute(`INSERT INTO courses (id, name, teacher_id, weekday, start_time, end_time, student_ids, effective_start_date, created_at)
+      VALUES (?, ?, 'teacher-1', ?, ?, ?, ?, ?, ?)`, [id, name, weekday, start, end, JSON.stringify(oldIds), priorDate, `${priorDate} 00:00:00`])
+  }
+  // Strict API validation stays in place; the edit form must remove hidden invalid IDs.
+  const rejected = await fetch(`${base}/edusystem/api/courses/legacy-roster`, {
+    method: 'PUT', headers: authHeaders, body: JSON.stringify({ studentIds: oldIds })
+  })
+  assert.equal(rejected.status, 400)
+  assert.match((await rejected.json()).error, /课程名单包含不存在或已归档的学生/)
+  await page.goto(`${base}/courses`)
+  const card = page.locator('.course-card').filter({ has: page.getByRole('heading', { name: '管理旧名单课程', exact: true }) })
+  await card.getByText(/历史学生（已归档）/).waitFor({ state: 'visible' })
+  await card.getByRole('button', { name: '编辑', exact: true }).click()
+  const courseEdit = page.locator('.modal').filter({ has: page.getByRole('heading', { name: '编辑课程', exact: true }) })
+  await courseEdit.getByText(/本次名单已移除：历史学生（已归档）、已不存在的学生/).waitFor({ state: 'visible' })
+  await courseEdit.getByPlaceholder('如：三年级数学提高班').fill('管理旧名单已修复')
+  const courseSaved = page.waitForResponse(response => response.request().method() === 'PUT' && response.url().endsWith('/courses/legacy-roster'))
+  await courseEdit.getByRole('button', { name: '保存', exact: true }).click()
+  assert.equal((await courseSaved).status(), 200)
+  await courseEdit.waitFor({ state: 'hidden' })
+
+  await page.goto(`${base}/weekly-schedule`)
+  const nextOccurrence = page.locator(`.day-lane[data-date="${nextDate}"] .course-bar`).filter({ hasText: '周排课旧名单课程' })
+  await nextOccurrence.click()
+  const weeklyEdit = page.locator('.detail-modal').filter({ has: page.getByRole('heading', { name: '课程资料', exact: true }) })
+  await weeklyEdit.getByText(/本次名单已移除：历史学生（已归档）、已不存在的学生/).waitFor({ state: 'visible' })
+  await weeklyEdit.locator('label').filter({ hasText: '课程名称' }).locator('input').fill('周排课旧名单已修复')
+  const weeklySaved = page.waitForResponse(response => response.request().method() === 'PUT' && response.url().endsWith('/courses/weekly-roster'))
+  await weeklyEdit.getByRole('button', { name: '保存课程资料与名单' }).click()
+  assert.equal((await weeklySaved).status(), 200)
+  await weeklyEdit.waitFor({ state: 'hidden' })
+  for (const id of ['legacy-roster', 'weekly-roster']) {
+    const [[storedCourse]] = await pool.execute('SELECT student_ids FROM courses WHERE id = ?', [id])
+    assert.deepEqual(jsonIds(storedCourse.student_ids), ['roster-active'])
+    const [versions] = await pool.execute('SELECT student_ids FROM course_roster_versions WHERE course_id = ? ORDER BY effective_at', [id])
+    assert.deepEqual(versions.map(v => jsonIds(v.student_ids)), [oldIds, ['roster-active']])
+    const past = (await schedule.listOccurrences(priorDate, priorDate)).find(item => item.courseId === id)
+    const future = (await schedule.listOccurrences(nextDate, nextDate)).find(item => item.courseId === id)
+    assert.deepEqual(past.studentIds, oldIds, '修复名单不能修改历史课次的名单')
+    assert.deepEqual(future.studentIds, ['roster-active'], '后续课次应使用修复后的在读名单')
+  }
+  const [[retainedAttendance]] = await pool.execute('SELECT student_ids, original_student_ids FROM attendance WHERE id = ?', ['history-attendance'])
+  assert.deepEqual(retainedAttendance, historicalAttendance, '修复课程名单不能改写历史点名记录')
   assert.deepEqual(errors, [])
   await context.close()
-  process.stdout.write('isolated student browser API passed: create, search, hours, duplicate check, enrollment, status, archive and retained attendance/history\n')
+  process.stdout.write('isolated student browser API passed: student lifecycle and recovery permissions/balances; both course editors repair archived/missing rosters while preserving historical occurrences/attendance\n')
 } catch (error) {
   process.exitCode = 1
   throw error

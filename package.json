@@ -10,7 +10,7 @@
     "prebuild": "npm run check:file-lines",
     "dev": "vite",
     "build": "vite build",
-    "test:unit": "node --test tests/teacher-colors.test.mjs tests/history-pagination.test.mjs tests/auth-client.test.mjs tests/auth-refresh-timeout.test.mjs tests/backup-client.test.mjs tests/schedule-layout.test.mjs",
+    "test:unit": "node --test tests/teacher-colors.test.mjs tests/history-pagination.test.mjs tests/auth-client.test.mjs tests/auth-refresh-timeout.test.mjs tests/backup-client.test.mjs tests/schedule-layout.test.mjs tests/course-time.test.mjs",
     "test:ui": "node scripts/run-ui-tests.mjs",
     "preview": "vite preview"
   },

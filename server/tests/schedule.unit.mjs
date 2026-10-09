@@ -61,11 +61,11 @@ test('a course created for the second displayed week starts in that week', () =>
   assert.deepEqual(rows.map(row => row.date), ['2026-10-12', '2026-10-19'])
 })
 
-test('new recurring courses start on their first not-yet-started class date', () => {
+test('new recurring courses include today even after the class has started', () => {
   const tuesdayMorning = new Date(2026, 8, 29, 8, 30)
   const tuesdayAfternoon = new Date(2026, 8, 29, 16, 0)
   assert.equal(firstFutureCourseDate({ weekday: 2, startTime: '09:00', endTime: '10:00' }, tuesdayMorning), '2026-09-29')
-  assert.equal(firstFutureCourseDate({ weekday: 2, startTime: '09:00', endTime: '10:00' }, tuesdayAfternoon), '2026-10-06')
+  assert.equal(firstFutureCourseDate({ weekday: 2, startTime: '09:00', endTime: '10:00' }, tuesdayAfternoon), '2026-09-29')
   assert.equal(firstFutureCourseDate({ weekday: 1, startTime: '09:00', endTime: '10:00' }, tuesdayMorning), '2026-10-05')
   assert.equal(firstFutureCourseDate({ weekday: 7, startTime: '09:00', endTime: '10:00' }, tuesdayMorning), '2026-10-04')
 })

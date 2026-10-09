@@ -39,6 +39,11 @@ router.delete('/:id', filterByTeacher, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+router.post('/:id/restore', filterByTeacher, async (req, res, next) => {
+  try { res.json(await studentService.restore(req.params.id, req.teacherScope)) }
+  catch (err) { next(err) }
+})
+
 router.get('/check-name', filterByTeacher, async (req, res, next) => {
   try {
     const { name, excludeId } = req.query

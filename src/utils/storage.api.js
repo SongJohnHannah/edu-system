@@ -19,6 +19,10 @@ export async function deleteStudent(id) {
   return api.del(`/students/${id}`)
 }
 
+export async function restoreStudent(id) {
+  return api.post(`/students/${id}/restore`)
+}
+
 export async function checkStudentNameExists(name, excludeId = null) {
   const result = await api.get(`/students/check-name?name=${encodeURIComponent(name)}${excludeId ? '&excludeId=' + excludeId : ''}`)
   return result.exists

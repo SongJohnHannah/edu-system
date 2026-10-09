@@ -36,6 +36,7 @@
         <div class="course-header">
           <h3 class="course-name">{{ course.name }}</h3>
           <span class="course-time">{{ getWeekdayText(course.weekday) }} {{ course.startTime || '' }}-{{ course.endTime || '' }}</span>
+          <span v-if="course.upcomingSchedule" class="schedule-hint">{{ course.upcomingSchedule.effectiveWeekStart }} 起 {{ course.upcomingSchedule.startTime }}—{{ course.upcomingSchedule.endTime }}</span>
         </div>
         <div class="course-details">
           <div class="detail-row">
@@ -105,21 +106,14 @@
                 :options="timeOptions"
                 placeholder="选择开始时间"
                 :searchable="false"
-                :disabled="!!editingCourse"
               />
             </div>
             <div class="form-group">
               <label>结束时间 *</label>
-              <SearchSelect
-                v-model="form.endTime"
-                :options="timeOptions"
-                placeholder="选择结束时间"
-                :searchable="false"
-                :disabled="!!editingCourse"
-              />
+              <OfficeInput class="input" type="text" :model-value="formEndTime" readonly placeholder="根据开始时间和课时自动计算" />
             </div>
           </div>
-          <p v-if="editingCourse" class="schedule-hint">日期和时间请到 <router-link to="/weekly-schedule" @click="closeModal">周排课</router-link> 中选择「仅这一次」或「从这次起每周」调整。</p>
+          <p class="schedule-hint">结束时间按开始时间＋课时自动计算，0.5 课时为 30 分钟。<template v-if="editingCourse">时间修改应用于后续每周课程；单次调课和修改星期请到 <router-link to="/weekly-schedule" @click="closeModal">周排课</router-link>。</template></p>
           <div class="form-row">
             <div class="form-group">
               <label>每次课时</label>
@@ -132,6 +126,7 @@
           </div>
           <div class="form-group">
             <label>上课学生 *</label>
+            <p v-if="excludedStudents.length" class="schedule-hint">本次名单已移除：{{ excludedStudents.join('、') }}。保存后历史课次保留原名单；如需重新加入，请先到学生管理恢复并确认报名。</p>
             <OfficeInput type="text" class="input student-search" v-model="studentSearchText" placeholder="搜索学生姓名..." />
             <div class="student-select">
               <button type="button" class="student-btn" v-for="s in filteredStudents" :key="s.id"
@@ -169,6 +164,8 @@ import { getCourses, addCourse, updateCourse, deleteCourse, getTeachers, getStud
 import { useToast } from '../composables/useToast'
 import SearchSelect from '../components/SearchSelect.vue'
 import { useAuthStore } from '../stores/auth.js'
+import { courseEndTime } from '../../shared/courseTime.js'
+import { courseStudentLabel, prepareCourseRoster } from '../utils/courseRoster.js'
 
 const toast = useToast()
 const auth = useAuthStore()
@@ -189,6 +186,7 @@ const loading = ref(true)
 const loadError = ref(false)
 const showModal = ref(false)
 const editingCourse = ref(null)
+const excludedStudents = ref([])
 let modalVersion = 0
 const hoursRawInput = ref(null)
 const studentSearchText = ref('')
@@ -208,11 +206,12 @@ const form = ref({
   teacherId: '',
   weekday: 1,
   startTime: '09:00',
-  endTime: '11:00',
+  endTime: '10:00',
   hoursPerClass: 1,
   classroom: '',
   studentIds: []
 })
+const formEndTime = computed(() => courseEndTime(form.value.startTime, hoursRawInput.value ?? form.value.hoursPerClass))
 
 let loadRequest = 0
 let loadErrorToast = null
@@ -297,7 +296,7 @@ function getTeacherName(teacherId) {
 function getStudentNames(studentIds) {
   return (studentIds || []).map(id => {
     const student = students.value.find(s => s.id === id)
-    return student ? student.name : ''
+    return courseStudentLabel(student)
   }).filter(Boolean).join('、') || '无'
 }
 
@@ -314,7 +313,9 @@ function editCourse(course) {
   if (!canEdit(course)) return
   modalVersion++
   editingCourse.value = course
-  form.value = { ...course, studentIds: [...(course.studentIds || [])] }
+  const roster = prepareCourseRoster(course.studentIds, students.value)
+  excludedStudents.value = roster.excluded
+  form.value = { ...course, startTime: course.upcomingSchedule?.startTime ?? course.startTime, studentIds: roster.studentIds }
   hoursRawInput.value = null
   showModal.value = true
 }
@@ -322,6 +323,7 @@ function editCourse(course) {
 function openCreate() {
   modalVersion++
   editingCourse.value = null
+  excludedStudents.value = []
   form.value.teacherId = auth.teacherId || activeTeachers.value[0]?.id || ''
   hoursRawInput.value = null
   showModal.value = true
@@ -342,17 +344,19 @@ function upsertCourse(course) {
 
 async function saveCourse() {
   if (submitting.value) return
+  const roster = prepareCourseRoster(form.value.studentIds, students.value)
+  form.value.studentIds = roster.studentIds
+  excludedStudents.value = [...new Set([...excludedStudents.value, ...roster.excluded])]
+  if (!form.value.studentIds.length) return toast.error('请至少选择一名已报名且在读的学生，或先恢复归档学生')
 
-  if (form.value.startTime && form.value.endTime && form.value.startTime >= form.value.endTime) {
-    toast.error('结束时间必须晚于开始时间')
-    return
-  }
   const hpc = Number(hoursRawInput.value ?? form.value.hoursPerClass)
   if (!Number.isFinite(hpc) || hpc < 0.5 || hpc > 999.5 || !Number.isInteger(hpc * 2)) {
     toast.error('每次课时须为 0.5 至 999.5 的半课时倍数')
     return
   }
   form.value.hoursPerClass = hpc
+  form.value.endTime = formEndTime.value
+  if (!form.value.endTime) return toast.error('请检查开始时间和课时，结束时间不能晚于22:30')
 
   const editing = editingCourse.value
   const requestVersion = modalVersion
@@ -371,7 +375,9 @@ async function saveCourse() {
         }
         return
       }
-      upsertCourse(await updateCourse(editing.id, submittedForm))
+      const updated = await updateCourse(editing.id, submittedForm)
+      upsertCourse(updated)
+      if (updated.timeChange) toast.success(`新时间从 ${updated.timeChange.effectiveDate} 起每周生效`)
     } else {
       upsertCourse(await addCourse(submittedForm))
     }
@@ -410,6 +416,7 @@ function closeModal() {
   modalVersion++
   showModal.value = false
   editingCourse.value = null
+  excludedStudents.value = []
   hoursRawInput.value = null
   studentSearchText.value = ''
   form.value = {
@@ -417,7 +424,7 @@ function closeModal() {
     teacherId: '',
     weekday: 1,
     startTime: '09:00',
-    endTime: '11:00',
+    endTime: '10:00',
     hoursPerClass: 1,
     classroom: '',
     studentIds: []

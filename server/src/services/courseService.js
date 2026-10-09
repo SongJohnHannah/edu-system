@@ -1,7 +1,8 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
 import { formatDateTime } from '../utils/dateFormat.js'
-import { acquireScheduleLock, closeScheduleConnection, assertRecurringAvailable, assertCourseFutureAvailable, ensureCourseCanChange, firstFutureCourseDate, futureTrialWindow, weekStartOf, iso } from './scheduleService.js'
+import { acquireScheduleLock, closeScheduleConnection, assertRecurringAvailable, assertCourseFutureAvailable, ensureCourseCanChange, firstFutureCourseDate, futureTrialWindow, weekStartOf, iso, editRecurringTime } from './scheduleService.js'
+import { courseEndTime } from '../../../shared/courseTime.js'
 
 function courseDetails(data, previous = {}) {
   const name = String(data.name ?? previous.name ?? '').trim()
@@ -55,10 +56,14 @@ export async function getAll(teacherScope, includeArchived = false) {
 }
 
 async function overlayCurrentSchedules(courses, db = pool) {
-  const [versions] = await db.execute('SELECT * FROM course_schedule_versions WHERE effective_week_start <= ? ORDER BY effective_week_start', [weekStartOf(iso(new Date()))])
+  const week = weekStartOf(iso(new Date()))
+  const [versions] = await db.execute('SELECT * FROM course_schedule_versions ORDER BY effective_week_start')
   return courses.map(course => {
-    const version = versions.filter(v => v.course_id === course.id).at(-1)
-    return version ? { ...course, weekday: version.weekday, startTime: version.start_time, endTime: version.end_time } : course
+    const own = versions.filter(v => v.course_id === course.id)
+    const version = own.filter(v => iso(v.effective_week_start) <= week).at(-1)
+    const upcoming = own.find(v => iso(v.effective_week_start) > week)
+    return { ...course, ...(version ? { weekday: version.weekday, startTime: version.start_time, endTime: version.end_time } : {}),
+      upcomingSchedule: upcoming ? { effectiveWeekStart: iso(upcoming.effective_week_start), startTime: upcoming.start_time, endTime: upcoming.end_time } : null }
   })
 }
 
@@ -79,15 +84,15 @@ export async function verifyAccess(id, teacherScope) {
 
 export async function create(data) {
   const details = courseDetails(data)
+  const endTime = courseEndTime(data.startTime, details.hours)
+  if (!endTime) throw Object.assign(new Error('请检查开始时间和课时，课程须在07:30至22:30之间'), { status: 400 })
+  data = { ...data, endTime }
   const id = generateId()
   const now = new Date()
   const firstDate = firstFutureCourseDate(data, now)
   const effectiveStartDate = data.effectiveStartDate || firstDate
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveStartDate) || iso(new Date(`${effectiveStartDate}T12:00:00`)) !== effectiveStartDate || effectiveStartDate < iso(now)) {
     throw Object.assign(new Error('课程开始生效日期须为今天或之后的有效日期'), { status: 400 })
-  }
-  if (effectiveStartDate === iso(now) && firstDate > effectiveStartDate && Number(data.weekday) === (now.getDay() || 7)) {
-    throw Object.assign(new Error('今天这节课已开始，请选择未来的排课日期'), { status: 400 })
   }
   const conn = await pool.getConnection()
   let locked = false
@@ -129,7 +134,13 @@ export async function update(id, data, teacherScope = null) {
     if (teacherScope && c.teacher_id !== teacherScope) throw Object.assign(new Error('只能修改自己的课程'), { status: 403 })
     if (data.teacherId && data.teacherId !== c.teacher_id) throw Object.assign(new Error('请使用课程交接功能更换教师'), { status: 400 })
     const current = await getById(id, conn)
-    if (['weekday', 'startTime', 'endTime'].some(key => data[key] !== undefined && String(data[key]) !== String(current[key]))) throw Object.assign(new Error('请在周排课中选择调课范围后修改时间'), { status: 400 })
+    if (data.weekday !== undefined && Number(data.weekday) !== Number(current.weekday)) throw Object.assign(new Error('请在周排课中选择调课范围后修改星期'), { status: 400 })
+    const { name, classroom, hours } = courseDetails(data, c)
+    const startTime = data.startTime ?? current.upcomingSchedule?.startTime ?? current.startTime
+    const endTime = courseEndTime(startTime, hours)
+    if (!endTime) throw Object.assign(new Error('请检查开始时间和课时，课程须在07:30至22:30之间'), { status: 400 })
+    const timeChange = startTime !== current.startTime || endTime !== current.endTime || current.upcomingSchedule
+      ? await editRecurringTime(conn, current, startTime, hours, teacherScope) : null
     const oldIds = typeof c.student_ids === 'string' ? JSON.parse(c.student_ids) : c.student_ids || []
     const nextIds = data.studentIds ?? oldIds
     if (JSON.stringify(oldIds) !== JSON.stringify(nextIds)) {
@@ -146,16 +157,19 @@ export async function update(id, data, teacherScope = null) {
       await conn.execute('UPDATE courses SET student_ids = ? WHERE id = ?', [JSON.stringify(nextIds), id])
       await assertCourseFutureAvailable(conn, id)
     }
-    const { name, classroom, hours } = courseDetails(data, c)
-    if (name !== c.name || classroom !== c.classroom || hours !== Number(c.hours_per_class)) {
+    if (timeChange || name !== c.name || classroom !== c.classroom || hours !== Number(c.hours_per_class)) {
       const [history] = await conn.execute('SELECT id FROM course_detail_versions WHERE course_id = ? LIMIT 1', [id])
       if (!history.length) await conn.execute('INSERT INTO course_detail_versions (id, course_id, effective_at, name, classroom, hours_per_class) VALUES (?, ?, ?, ?, ?, ?)', [generateId(), id, '1000-01-01', c.name, c.classroom || '', c.hours_per_class])
-      await conn.execute('INSERT INTO course_detail_versions (id, course_id, effective_at, name, classroom, hours_per_class) VALUES (?, ?, CURRENT_TIMESTAMP(3), ?, ?, ?)', [generateId(), id, name, classroom || '', hours])
+      const effectiveAt = timeChange ? `${timeChange.effectiveDate} ${startTime}:00` : null
+      // Replacing a pending time also replaces its future hours snapshot, even if hours are unchanged.
+      if (effectiveAt) await conn.execute('DELETE FROM course_detail_versions WHERE course_id = ? AND effective_at >= ?', [id, effectiveAt])
+      await conn.execute('INSERT INTO course_detail_versions (id, course_id, effective_at, name, classroom, hours_per_class) VALUES (?, ?, COALESCE(?, CURRENT_TIMESTAMP(3)), ?, ?, ?)', [generateId(), id,
+        effectiveAt, name, classroom || '', hours])
       await conn.execute('UPDATE courses SET name = ?, classroom = ?, hours_per_class = ? WHERE id = ?', [name, classroom, hours, id])
     }
     const result = await getById(id, conn)
     await conn.commit()
-    return result
+    return { ...result, timeChange }
   } catch (error) { await conn.rollback(); throw error }
   finally { await closeScheduleConnection(conn, locked) }
 }

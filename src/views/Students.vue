@@ -78,6 +78,7 @@
               </div>
               <div class="action-buttons" v-else>
                 <OfficeButton class="btn btn-text" @click="goToHistory(student.id)" title="课时历史">历史</OfficeButton>
+                <OfficeButton v-if="canRestore(student)" class="btn btn-text" :disabled="submitting" @click="restoreArchivedStudent(student)">恢复</OfficeButton>
               </div>
             </td>
           </tr>
@@ -114,6 +115,7 @@
           </template>
           <template v-else>
             <OfficeButton class="btn btn-text" @click="goToHistory(student.id)">历史</OfficeButton>
+            <OfficeButton v-if="canRestore(student)" class="btn btn-text" :disabled="submitting" @click="restoreArchivedStudent(student)">恢复</OfficeButton>
           </template>
         </div>
       </div>
@@ -309,7 +311,7 @@ const showStudentDetail = computed({ get: () => !!detailStudent.value, set: valu
 
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getStudents, getTeachers, addStudent, updateStudent, deleteStudent, updateStudentStatus, addStudentsBatch, addHours, subtractHours, checkStudentNameExists } from '../utils/storage'
+import { getStudents, getTeachers, addStudent, updateStudent, deleteStudent, restoreStudent, updateStudentStatus, addStudentsBatch, addHours, subtractHours, checkStudentNameExists } from '../utils/storage'
 import { useToast } from '../composables/useToast'
 import { useAuthStore } from '../stores/auth.js'
 import { NSelect } from 'naive-ui'
@@ -324,6 +326,7 @@ const teachers = ref([])
 const enrollmentOptions = [{ label: '待报名（可预约试听）', value: 'pending' }, { label: '已报名', value: 'enrolled' }]
 function canEdit(student) { return isAdmin.value || auth.isTeacher && (student.createdBy === 'admin' || !!auth.teacherId && student.creatorId === auth.teacherId) }
 function canArchive(student) { return isAdmin.value || !!auth.teacherId && student.creatorId === auth.teacherId }
+function canRestore(student) { return student.status === 'deleted' && canArchive(student) }
 function creatorName(student) { return student.createdBy === 'admin' ? '管理员' : (teachers.value.find(t => t.id === student.creatorId)?.name || '原录入教师') }
 const students = ref([])
 const loading = ref(true)
@@ -529,6 +532,20 @@ function removeStudent(student) {
   showConfirmModal.value = true
 }
 
+function restoreArchivedStudent(student) {
+  if (submitting.value || !canRestore(student)) return
+  confirmData.value = {
+    title: '恢复学生',
+    message: `确定恢复学生"${student.name}"为正常状态吗？原有报名阶段、课时余额和历史记录会保留。`,
+    onConfirm: async () => {
+      upsertStudent(await restoreStudent(student.id))
+      toast.success('学生已恢复，可在全部学生中查看')
+    },
+    danger: false
+  }
+  showConfirmModal.value = true
+}
+
 function closeModal() {
   showModal.value = false
   editingStudent.value = null
@@ -688,11 +705,12 @@ onUnmounted(() => clearTimeout(nameTipTimer))
 
 async function handleConfirm() {
   if (submitting.value) return
+  const action = confirmData.value
   submitting.value = true
   try {
-    await confirmData.value.onConfirm()
-    showConfirmModal.value = false
-  } catch (error) { toast.error(error.message || '归档失败') }
+    await action.onConfirm()
+    if (confirmData.value === action) showConfirmModal.value = false
+  } catch (error) { toast.error(error.message || '操作失败') }
   finally { submitting.value = false }
 }
 
@@ -743,7 +761,7 @@ function goToHistory(studentId) {
 .table-container {
   background: white;
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  overflow-x: auto;
   box-shadow: var(--shadow-sm);
 }
 .table th, .table td { padding-inline: 10px; }

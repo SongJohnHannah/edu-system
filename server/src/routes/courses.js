@@ -76,7 +76,10 @@ router.delete('/:id', filterByTeacher, async (req, res, next) => {
 })
 
 router.get('/:id/adjustments', filterByTeacher, async (req, res, next) => {
-  try { res.json(await scheduleService.getAdjustments(req.params.id)) } catch (err) { next(err) }
+  try {
+    const adjustments = await scheduleService.getAdjustments(req.params.id)
+    res.json({ ...adjustments, course: await courseService.getById(req.params.id) })
+  } catch (err) { next(err) }
 })
 router.delete('/:id/adjustments/:kind/:adjustmentId', filterByTeacher, async (req, res, next) => {
   try { res.json(await scheduleService.removeAdjustment(req.params.id, req.params.kind, req.params.adjustmentId, req.teacherScope)) } catch (err) { next(err) }
