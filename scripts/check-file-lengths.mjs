@@ -7,11 +7,12 @@ const baseline = new Set(JSON.parse(fs.readFileSync(path.join(root, 'scripts', '
 const extensions = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.vue', '.css', '.scss', '.sql', '.md', '.json', '.html', '.yml', '.yaml', '.toml', '.xml', '.sh', '.ps1'])
 const excludedDirectories = new Set(['.git', '.qa', 'node_modules', 'dist', 'release', 'coverage', 'test-results', 'playwright-report'])
 const excludedFiles = new Set(['package-lock.json', 'pnpm-lock.yaml', 'edu_system_snapshot.sql'])
+const excludedSnapshots = new Set(['server/deployment/edu_system.sql'])
 const failures = []
 
 function checkFile(absolute) {
   const relative = path.relative(root, absolute).replaceAll('\\', '/')
-  if (excludedFiles.has(path.basename(relative)) || !extensions.has(path.extname(relative).toLowerCase())) return
+  if (excludedFiles.has(path.basename(relative)) || excludedSnapshots.has(relative) || !extensions.has(path.extname(relative).toLowerCase())) return
   const source = fs.readFileSync(absolute, 'utf8')
   const lines = source === '' ? 0 : source.split(/\r\n|\n|\r/).length - (/[\r\n]$/.test(source) ? 1 : 0)
   if (lines > 1800) failures.push(`${relative}: ${lines} 行，超过所有文件适用的 1800 行上限`)
