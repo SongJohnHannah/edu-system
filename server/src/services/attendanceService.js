@@ -12,7 +12,7 @@ function formatAttendance(row) {
     startTime: row.start_time_snapshot || null, endTime: row.end_time_snapshot || null,
     studentIds: idsOf(row.student_ids), hoursDeducted: Number(row.hours_deducted),
     originalStudentIds: idsOf(row.original_student_ids || row.student_ids),
-    recordedBy: row.recorded_by, isTest: !!row.is_test,
+    recordedBy: row.recorded_by, teachingTeacherId: row.teaching_teacher_id || null, isTest: !!row.is_test,
     courseName: row.course_name_snapshot || '', teacherName: row.teacher_name_snapshot || '',
     studentNamesSnapshot: typeof row.student_names_snapshot === 'string'
       ? JSON.parse(row.student_names_snapshot) : (row.student_names_snapshot || {}),
@@ -86,10 +86,10 @@ export async function create(data, teacherScope, user) {
     await conn.execute(
       `INSERT INTO attendance (id, course_id, date, original_date, student_ids, hours_deducted, recorded_by, is_test,
        course_name_snapshot, teacher_name_snapshot, student_names_snapshot, original_student_ids,
-       start_time_snapshot, end_time_snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       start_time_snapshot, end_time_snapshot, teaching_teacher_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, data.courseId, data.date, occurrence.originalDate, JSON.stringify(data.studentIds), hours, teacherScope || null,
        (data.isTest || courseRows[0].is_test) ? 1 : 0, occurrence.name, occurrence.teacherName,
-       JSON.stringify(studentNames), JSON.stringify(data.studentIds), occurrence.startTime, occurrence.endTime]
+       JSON.stringify(studentNames), JSON.stringify(data.studentIds), occurrence.startTime, occurrence.endTime, occurrence.teacherId]
     )
     for (const studentId of data.studentIds) {
       await conn.execute('UPDATE students SET used_hours = used_hours + ? WHERE id = ?', [hours, studentId])

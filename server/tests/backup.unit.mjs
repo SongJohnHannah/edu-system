@@ -26,13 +26,15 @@ test('SQL backup parser keeps semicolons inside values and rejects DDL', async (
   await assert.rejects(() => importSQL('DROP TABLE students;'), /仅支持系统备份中的数据语句/)
 })
 
-test('incomplete version 5 backups are rejected before connecting to the database', async () => {
+test('incomplete version 5 and 6 backups are rejected before connecting to the database', async () => {
   const original = pool.getConnection
   let connections = 0
   pool.getConnection = async () => { connections++; throw new Error('unexpected connection') }
   try {
-    await assert.rejects(() => importData({ version: '5.0', data: { tables: { students: [] } } }), /新版备份文件不完整/)
-    await assert.rejects(() => importSQL('-- 嘉言思听教务系统 SQL 备份 v5\nDELETE FROM students;'), /新版 SQL 备份文件不完整/)
+    for (const version of ['5', '6']) {
+      await assert.rejects(() => importData({ version: `${version}.0`, data: { tables: { students: [] } } }), /新版备份文件不完整/)
+      await assert.rejects(() => importSQL(`-- 嘉言思听教务系统 SQL 备份 v${version}\nDELETE FROM students;`), /新版 SQL 备份文件不完整/)
+    }
     assert.equal(connections, 0)
   } finally { pool.getConnection = original }
 })

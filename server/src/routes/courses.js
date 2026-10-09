@@ -3,6 +3,7 @@ import { filterByTeacher } from '../middleware/rbac.js'
 import * as courseService from '../services/courseService.js'
 import * as studentService from '../services/studentService.js'
 import * as scheduleService from '../services/scheduleService.js'
+import * as substitutionService from '../services/substitutionService.js'
 
 const router = Router()
 
@@ -54,6 +55,16 @@ router.post('/:id/reschedule', filterByTeacher, async (req, res, next) => {
   try {
     res.json(await scheduleService.reschedule(req.params.id, req.body, req.teacherScope))
   } catch (err) { next(err) }
+})
+
+router.post('/:id/substitution', filterByTeacher, async (req, res, next) => {
+  try { res.json(await substitutionService.arrange(req.params.id, req.body, req.teacherScope, req.user)) }
+  catch (err) { next(err) }
+})
+
+router.delete('/:id/substitution/:originalDate', filterByTeacher, async (req, res, next) => {
+  try { res.json(await substitutionService.cancel(req.params.id, req.params.originalDate, req.teacherScope, req.user)) }
+  catch (err) { next(err) }
 })
 
 router.delete('/:id', filterByTeacher, async (req, res, next) => {

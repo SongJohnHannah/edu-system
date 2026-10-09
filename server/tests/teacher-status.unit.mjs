@@ -21,6 +21,7 @@ test('stopping a teacher only blocks trials whose start is still in the future',
       if (sql.startsWith('SELECT * FROM teachers')) return [[{ id: 'teacher-1', name: '林老师', status: 'deleted' }]]
       if (sql.startsWith('SELECT id, teacher_id FROM users')) return [[]]
       if (sql.startsWith('SELECT id FROM courses')) return [[]]
+      if (sql.startsWith('SELECT s.id')) return [[]]
       if (sql.startsWith('SELECT id FROM trial_bookings')) {
         trialQuery = { sql, params }
         const [, afterDate, onDate, afterTime] = params

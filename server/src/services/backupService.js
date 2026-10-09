@@ -2,9 +2,10 @@ import pool from '../config/database.js'
 
 export const backupTables = ['settings', 'classes', 'teachers', 'users', 'students', 'courses',
   'course_schedule_versions', 'course_roster_versions', 'course_detail_versions', 'course_occurrence_changes',
-  'trial_bookings', 'attendance', 'attendance_reversals', 'hour_records', 'course_handovers']
+  'trial_bookings', 'attendance', 'attendance_reversals', 'hour_records', 'course_handovers', 'course_substitutions']
 const extensionTables = ['attendance_reversals', 'trial_bookings', 'course_occurrence_changes',
-  'course_schedule_versions', 'course_roster_versions', 'course_detail_versions', 'course_handovers']
+  'course_schedule_versions', 'course_roster_versions', 'course_detail_versions', 'course_handovers', 'course_substitutions']
+const versionFiveTables = backupTables.filter(table => table !== 'course_substitutions')
 const invalid = message => Object.assign(new Error(message), { status: 400 })
 
 export async function exportData() {
@@ -17,14 +18,14 @@ export async function exportData() {
       tables[table] = rows
     }
     await conn.commit()
-    return { version: '5.0', exportedAt: new Date().toISOString(), source: 'mysql', data: { tables } }
+    return { version: '6.0', exportedAt: new Date().toISOString(), source: 'mysql', data: { tables } }
   } catch (error) { await conn.rollback(); throw error }
   finally { conn.release() }
 }
 
 export async function exportSQL() {
   const { data: { tables } } = await exportData()
-  const lines = ['-- 嘉言思听教务系统 SQL 备份 v5', `-- 导出时间: ${new Date().toISOString()}`]
+  const lines = ['-- 嘉言思听教务系统 SQL 备份 v6', `-- 导出时间: ${new Date().toISOString()}`]
   for (const table of [...backupTables].reverse()) lines.push(`DELETE FROM ${table};`)
   for (const table of backupTables) for (const row of tables[table]) {
     const columns = Object.keys(row)
@@ -57,7 +58,7 @@ export async function importData(input) {
     tables.course_detail_versions = []
   }
   for (const [table, rows] of Object.entries(tables)) if (!backupTables.includes(table) || !Array.isArray(rows)) throw invalid('备份表或数据格式无效')
-  if (input.version === '5.0' && backupTables.some(table => !Object.hasOwn(tables, table))) {
+  if ((input.version === '5.0' ? versionFiveTables : input.version === '6.0' ? backupTables : []).some(table => !Object.hasOwn(tables, table))) {
     throw invalid('新版备份文件不完整，缺少业务表')
   }
   const order = backupTables.filter(table => Object.hasOwn(tables, table))
@@ -109,6 +110,7 @@ export function splitBackupSQL(sql) {
 export async function importSQL(sql) {
   if (typeof sql !== 'string') throw invalid('SQL 备份格式无效')
   const isVersionFive = /^\s*--\s*嘉言思听教务系统 SQL 备份 v5\b/m.test(sql)
+  const isVersionSix = /^\s*--\s*嘉言思听教务系统 SQL 备份 v6\b/m.test(sql)
   const statements = splitBackupSQL(sql).map(statement => statement.replace(/^TRUNCATE\s+TABLE\s+/i, 'DELETE FROM '))
   if (!statements.length) throw invalid('SQL 备份为空')
   const includedTables = new Set()
@@ -119,7 +121,7 @@ export async function importSQL(sql) {
     includedTables.add(match[1])
     if (/^DELETE FROM\s+/i.test(statement)) clearedTables.add(match[1])
   }
-  if (isVersionFive && backupTables.some(table => !clearedTables.has(table))) {
+  if ((isVersionSix ? backupTables : isVersionFive ? versionFiveTables : []).some(table => !clearedTables.has(table))) {
     throw invalid('新版 SQL 备份文件不完整，缺少业务表清理语句')
   }
   const conn = await pool.getConnection()

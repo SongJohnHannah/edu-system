@@ -84,7 +84,8 @@ async function loadState(conn, start, end) {
   const [handovers] = await conn.execute('SELECT * FROM course_handovers ORDER BY created_at')
   const [rosterVersions] = await conn.execute('SELECT * FROM course_roster_versions ORDER BY effective_at')
   const [detailVersions] = await conn.execute('SELECT * FROM course_detail_versions ORDER BY effective_at, id')
-  return { courses, versions, changes, handovers, rosterVersions, detailVersions }
+  const [substitutions] = await conn.execute("SELECT * FROM course_substitutions WHERE status = 'active'")
+  return { courses, versions, changes, handovers, rosterVersions, detailVersions, substitutions }
 }
 
 function teacherAt(state, course, date, startTime) {
@@ -123,10 +124,14 @@ export function occurrencesFromState(state, start, end) {
       const detail = (state.detailVersions || []).filter(v => v.course_id === course.id && sqlDateTime(v.effective_at) <= `${date} ${startTime}:00`).at(-1) || course
       const roster = (state.rosterVersions || []).filter(r => r.course_id === course.id &&
         sqlDateTime(r.effective_at) <= `${date} ${startTime}:00`).at(-1)
+      const originalTeacherId = teacherAt(state, course, date, startTime)
+      const substitution = (state.substitutions || []).find(s => s.course_id === course.id && iso(s.original_date) === originalDate && s.status === 'active')
       result.push({
         id: `${course.id}:${originalDate}`, courseId: course.id, originalDate, date,
         weekday: date === originalDate ? weekday : (day(date).getDay() || 7),
-        name: detail.name, teacherId: teacherAt(state, course, date, startTime),
+        name: detail.name, teacherId: substitution?.teacher_id || originalTeacherId,
+        originalTeacherId, ownerTeacherId: course.teacher_id,
+        substitution: substitution ? { id: substitution.id, reason: substitution.reason, arrangedBy: substitution.arranged_by } : null,
         startTime,
         endTime: change?.end_time ?? version?.end_time ?? course.end_time,
         classroom: detail.classroom, hoursPerClass: Number(detail.hours_per_class),
@@ -153,7 +158,8 @@ export async function listOccurrences(start, end, conn = pool) {
     const key = `${booking.course_id}:${iso(booking.occurrence_date)}`
     counts.set(key, (counts.get(key) || 0) + 1)
   }
-  return rows.map(row => ({ ...row, teacherName: names.get(row.teacherId) || '', trialCount: counts.get(row.id) || 0 }))
+  return rows.map(row => ({ ...row, teacherName: names.get(row.teacherId) || '',
+    originalTeacherName: names.get(row.originalTeacherId) || '', trialCount: counts.get(row.id) || 0 }))
 }
 
 async function ensureNoTrialImpact(conn, courseId, fromDate, onlyOriginalDate = null, untilDate = null) {
@@ -199,9 +205,10 @@ export async function assertRecurringAvailable(conn, candidate, ownCourseId = nu
   const [changes] = await conn.execute('SELECT target_date FROM course_occurrence_changes WHERE target_date >= ?', [fromDate])
   const [trials] = await conn.execute("SELECT booking_date FROM trial_bookings WHERE status = 'active' AND booking_date >= ?", [fromDate])
   const [futureCourses] = await conn.execute('SELECT effective_start_date FROM courses WHERE effective_start_date >= ? AND archived_at IS NULL', [fromDate])
+  const [substitutions] = await conn.execute("SELECT original_date FROM course_substitutions WHERE status = 'active' AND original_date >= ?", [fromDate])
   const boundaries = [week, ...versions.map(v => weekStartOf(v.effective_week_start)),
     ...changes.map(c => weekStartOf(c.target_date)), ...trials.map(t => weekStartOf(t.booking_date)),
-    ...futureCourses.map(c => weekStartOf(c.effective_start_date))]
+    ...futureCourses.map(c => weekStartOf(c.effective_start_date)), ...substitutions.map(s => weekStartOf(s.original_date))]
   const weeks = [...new Set(boundaries.flatMap(boundary => [boundary, addDays(boundary, 7)]))]
     .filter(value => !untilDate || value < untilDate).sort()
   for (const boundary of weeks) {
@@ -213,7 +220,8 @@ export async function assertRecurringAvailable(conn, candidate, ownCourseId = nu
     // subsequent weeks replace their own recurring lesson.
     const replacesOwnWeek = weekStartOf(candidate.originalDate || targetDate) === boundary || boundary > weekStartOf(fromDate)
     const ownOccurrence = replacesOwnWeek && ownCourseId && occurrences.find(item => item.courseId === ownCourseId && weekStartOf(item.originalDate) === boundary)
-    const proposed = { ...candidate, date: targetDate, originalDate: ownOccurrence?.originalDate ?? candidate.originalDate }
+    const proposed = { ...candidate, date: targetDate, originalDate: ownOccurrence?.originalDate ?? candidate.originalDate,
+      teacherId: ownOccurrence?.substitution ? ownOccurrence.teacherId : candidate.teacherId }
     assertNoOccurrenceConflict(proposed, occurrences, ownCourseId)
     await assertNoTrialConflict(conn, proposed, ownCourseId)
   }
@@ -269,6 +277,8 @@ async function rescheduleInTransaction(conn, courseId, data, teacherScope) {
         [generateId(), courseId, originalDate, targetDate, startTime, endTime]
       )
     } else {
+      const [substitutions] = await conn.execute("SELECT id FROM course_substitutions WHERE course_id = ? AND original_date >= ? AND status = 'active' LIMIT 1", [courseId, originalDate])
+      if (substitutions.length) throw conflict('请先取消该课程后续的临时代课，再更改固定课表')
       await ensureNoTrialImpact(conn, courseId, week > iso(new Date()) ? week : iso(new Date()))
       const [futureChanges] = await conn.execute('SELECT id FROM course_occurrence_changes WHERE course_id = ? AND original_date >= ? LIMIT 1', [courseId, originalDate])
       if (futureChanges.length) throw conflict('请先处理该课程后续的单次调课')
@@ -355,7 +365,7 @@ export { iso, addDays, overlaps }
 // Validate actual dated occurrences, including this course's one-time overrides.
 export async function assertCourseFutureAvailable(conn, courseId) {
   const today = iso(new Date())
-  const [versions] = await conn.execute('SELECT effective_week_start AS boundary FROM course_schedule_versions UNION SELECT target_date FROM course_occurrence_changes UNION SELECT original_date FROM course_occurrence_changes UNION SELECT DATE(effective_at) FROM course_roster_versions UNION SELECT DATE(created_at) FROM course_handovers UNION SELECT effective_start_date FROM courses WHERE effective_start_date IS NOT NULL AND archived_at IS NULL')
+  const [versions] = await conn.execute("SELECT effective_week_start AS boundary FROM course_schedule_versions UNION SELECT target_date FROM course_occurrence_changes UNION SELECT original_date FROM course_occurrence_changes UNION SELECT original_date FROM course_substitutions WHERE status = 'active' UNION SELECT DATE(effective_at) FROM course_roster_versions UNION SELECT DATE(created_at) FROM course_handovers UNION SELECT effective_start_date FROM courses WHERE effective_start_date IS NOT NULL AND archived_at IS NULL")
   const starts = [weekStartOf(today), ...versions.map(v => weekStartOf(v.boundary)).filter(w => w >= weekStartOf(today))]
   const weeks = [...new Set(starts.flatMap(w => [w, addDays(w, 7)]))]
   const now = sqlDateTime(new Date())
@@ -421,6 +431,10 @@ export async function removeAdjustment(courseId, kind, adjustmentId, teacherScop
     }
     if (onceRecord) await ensureNoTrialImpact(conn, courseId, iso(new Date()), iso(onceRecord.original_date))
     if (futureRecord) await ensureNoTrialImpact(conn, courseId, iso(futureRecord.effective_week_start), null, nextVersionStart)
+    if (futureRecord) {
+      const [substitutions] = await conn.execute("SELECT id FROM course_substitutions WHERE course_id = ? AND original_date >= ? AND status = 'active' LIMIT 1", [courseId, iso(futureRecord.effective_week_start)])
+      if (substitutions.length) throw conflict('请先取消受影响的临时代课，再移除固定课表')
+    }
     if (onceRecord) {
       const [attendance] = await conn.execute(
         `SELECT id FROM attendance WHERE course_id = ? AND

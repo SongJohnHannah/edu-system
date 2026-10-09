@@ -356,3 +356,5 @@ export async function getHandoverHistory(courseId) {
 
 export const getScheduleAdjustments = id => api.get(`/courses/${id}/adjustments`)
 export const removeScheduleAdjustment = (id, kind, changeId) => api.del(`/courses/${id}/adjustments/${kind}/${changeId}`)
+export const arrangeSubstitution = (id, data) => api.post(`/courses/${id}/substitution`, data)
+export const cancelSubstitution = (id, originalDate) => api.del(`/courses/${id}/substitution/${originalDate}`)

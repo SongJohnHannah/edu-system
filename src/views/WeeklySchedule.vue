@@ -42,6 +42,7 @@
                 <span class="agenda-time">{{ item.startTime }}—{{ item.endTime }}</span>
                 <strong>{{ item.name }}</strong>
                 <span>{{ item.teacherName }}<template v-if="item.type === 'course'"> · 正式学生 {{ item.studentIds.length }} 人</template></span>
+                <span v-if="item.substitution" class="substitution-label">临时代课 · 原老师：{{ item.originalTeacherName }}</span>
                 <span v-if="item.hasConflict || item.outOfBounds" class="course-warning">{{ item.hasConflict ? '时间冲突，请处理' : '超出显示时段' }}</span>
                 <span v-if="item.type === 'course' && item.trialCount" class="trial-count">试听预约 {{ item.trialCount }} 人</span>
                 <span v-if="item.type === 'trial'" class="trial-count">独立试听 · {{ item.studentName }}</span>
@@ -69,12 +70,12 @@
               <TransitionGroup name="bar">
                 <div v-for="(item, itemIndex) in (itemsByDate[d.date] || []).filter(item => !item.hasOverlap)" :key="item.id" class="schedule-item course-bar"
                   :class="{ trial: item.type === 'trial', readonly: !canEdit(item), draggable: canDrag(item), compact: minutes(item.endTime) - minutes(item.startTime) <= 30, dragging: drag.item?.id === item.id && drag.active, 'out-of-bounds': item.outOfBounds }"
-                  :title="`${item.name} · ${item.startTime}—${item.endTime} · ${item.teacherName}`"
+                  :title="`${item.name} · ${item.startTime}—${item.endTime} · ${item.teacherName}${item.substitution ? '（临时代课）' : ''}`"
                   :aria-label="`${item.date} ${item.startTime} 至 ${item.endTime}，${item.name}，${item.teacherName}，查看详情`" role="button" tabindex="0"
                   :style="{ ...itemStyle(item), ...paletteStyle(item.teacherId), '--idx': itemIndex }" @pointerdown="startPointer($event, item)" @click="openItem(item)" @keydown.enter.prevent="openItem(item)" @keydown.space.prevent="openItem(item)" @dragstart.prevent>
                   <div class="bar-top"><strong class="bar-name">{{ item.name }}</strong><span v-if="item.type === 'course' && item.trialCount" class="trial-count" :data-short="`试${item.trialCount}`">试听 {{ item.trialCount }} 人</span><span v-if="item.type === 'trial'" class="trial-count" data-short="试听">试听</span></div>
                   <span class="bar-meta">{{ item.laneCount > 1 ? item.startTime : `${item.startTime}—${item.endTime}` }} <span v-if="item.outOfBounds || item.hasOverlap" title="查看详情处理警示">⚠</span></span>
-                  <div class="bar-bottom"><span class="bar-teacher">{{ item.teacherName }}</span><span class="bar-students">{{ item.type === 'course' ? `${item.studentIds.length} 人` : item.studentName }}</span></div>
+                  <div class="bar-bottom"><span class="bar-teacher">{{ item.teacherName }}{{ item.substitution ? ' · 代课' : '' }}</span><span class="bar-students">{{ item.type === 'course' ? `${item.studentIds.length} 人` : item.studentName }}</span></div>
                   <span v-if="canDrag(item)" class="drag-handle" title="按住拖动调整课程时间" aria-hidden="true"><svg viewBox="0 0 12 16" width="12" height="16" fill="currentColor"><circle cx="3" cy="3" r="1.25"/><circle cx="9" cy="3" r="1.25"/><circle cx="3" cy="8" r="1.25"/><circle cx="9" cy="8" r="1.25"/><circle cx="3" cy="13" r="1.25"/><circle cx="9" cy="13" r="1.25"/></svg></span>
                 </div>
               </TransitionGroup>
@@ -83,6 +84,7 @@
                 <span class="overlap-count">{{ group.items.length }} 节重叠 · 选择</span>
                 <span v-for="item in group.items" :key="item.id" class="course-bar has-overlap" :class="{ trial: item.type === 'trial' }" :style="paletteStyle(item.teacherId)">
                   <strong class="bar-name">{{ item.name }}</strong><span class="overlap-time">{{ item.startTime }}—{{ item.endTime }}</span>
+                  <span v-if="item.substitution" class="substitution-label">{{ item.teacherName }} · 代课</span>
                   <span v-if="item.trialCount" class="trial-count">试听 {{ item.trialCount }} 人</span>
                 </span>
               </button>
@@ -111,6 +113,7 @@
       <template v-if="selectedItem">
         <h2>{{ selectedItem.name }}</h2>
         <p>{{ selectedItem.date }} {{ selectedItem.startTime }}—{{ selectedItem.endTime }} · {{ selectedItem.teacherName }}</p>
+        <p v-if="selectedItem.substitution" class="substitution-label">临时代课：{{ selectedItem.teacherName }} · 原老师：{{ selectedItem.originalTeacherName }}<span v-if="selectedItem.substitution.reason"> · {{ selectedItem.substitution.reason }}</span></p>
         <p v-if="selectedItem.hasConflict || selectedItem.outOfBounds" class="course-warning">{{ selectedItem.hasConflict ? '这节课与同一老师或共同学生的其他安排存在时间冲突。' : '' }}{{ selectedItem.outOfBounds ? '课程时间超出周排课显示范围。' : '' }}</p>
         <template v-if="selectedItem.type === 'course'">
           <div class="detail-section"><h3>课程资料</h3>
@@ -136,7 +139,7 @@
         </template>
         <template v-else><div class="detail-section"><h3>试听学生</h3><p>{{ selectedItem.studentName }}</p><p>{{ selectedItem.note }}</p><NButton @click="router.push({ path: '/trial-bookings', query: { date: selectedItem.date } })">查看预约</NButton></div></template>
         <template v-if="selectedItem.type === 'course' && canEdit(selectedItem) && !isPast(selectedItem)">
-          <div class="detail-footer"><NButton @click="router.push({ path: '/trial-bookings', query: { date: selectedItem.date } })">安排试听</NButton><NButton type="primary" @click="editSelected">修改日期与时间</NButton></div>
+          <div class="detail-footer"><NButton @click="showSubstitution = true">{{ selectedItem.substitution ? '更换代课老师' : '安排代课' }}</NButton><NButton v-if="selectedItem.substitution" @click="showCancelSubstitution = true">取消代课</NButton><NButton @click="router.push({ path: '/trial-bookings', query: { date: selectedItem.date } })">安排试听</NButton><NButton type="primary" @click="editSelected">修改日期与时间</NButton></div>
           <div class="detail-section"><h3>已安排的调课</h3>
             <p v-if="!adjustments.once.length && !adjustments.future.length">暂无调课记录</p>
             <div v-for="change in adjustments.once" :key="change.id" class="adjustment-row"><span>{{ change.linkedFutureId ? '永久跨周调课：' : '仅本次：' }}{{ change.original_date }} → {{ change.target_date }} {{ change.start_time }}{{ change.linkedFutureId ? '，此后每周按目标星期上课' : '' }}</span><NButton v-if="!isPast({ date: change.target_date, startTime: change.start_time }) && (!change.linkedFutureId || !isPast({ date: change.original_date, startTime: change.start_time }))" size="small" @click="pendingRemoval = { kind: 'once', id: change.id }">移除</NButton></div>
@@ -144,6 +147,11 @@
           </div>
         </template>
       </template>
+    </NModal>
+
+    <SubstitutionModal v-model:show="showSubstitution" :occurrence="selectedItem" :teachers="teachers" @saved="substitutionSaved" />
+    <NModal v-model:show="showCancelSubstitution" preset="dialog" title="取消本次代课" positive-text="确认取消代课" negative-text="返回" :loading="cancellingSubstitution" @positive-click="removeSubstitution">
+      这一次将恢复由 {{ selectedItem?.originalTeacherName }} 授课，代课记录仍会保留。
     </NModal>
 
     <NModal :show="!!pendingRemoval" preset="dialog" title="移除未发生的调课" positive-text="确认移除" negative-text="返回" :loading="removingAdjustment" @negative-click="pendingRemoval = null" @close="pendingRemoval = null" @positive-click="confirmRemoveAdjustment">
@@ -207,7 +215,8 @@ import { teacherStyle } from '../utils/teacherColors.js'
 import { groupScheduleItems } from '../utils/scheduleLayout.js'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NButton, NModal, NRadio, NRadioGroup, NSelect, NSpace } from 'naive-ui'
-import { getCourseOccurrences, getTrialBookings, getStudents, getTeachers, addCourse, rescheduleCourse, rescheduleCourseDay, updateCourse, getScheduleAdjustments, removeScheduleAdjustment } from '../utils/storage.js'
+import { getCourseOccurrences, getTrialBookings, getStudents, getTeachers, addCourse, rescheduleCourse, rescheduleCourseDay, updateCourse, getScheduleAdjustments, removeScheduleAdjustment, cancelSubstitution } from '../utils/storage.js'
+import SubstitutionModal from '../components/SubstitutionModal.vue'
 import { useAuthStore } from '../stores/auth.js'
 import { useToast } from '../composables/useToast.js'
 
@@ -239,6 +248,9 @@ const referenceError = ref(false)
 const showDetail = ref(false)
 let detailRequest = 0
 const selectedItem = ref(null)
+const showSubstitution = ref(false)
+const showCancelSubstitution = ref(false)
+const cancellingSubstitution = ref(false)
 const showOverlap = ref(false)
 const overlapChoices = ref([])
 const viewportWidth = ref(window.innerWidth)
@@ -298,7 +310,7 @@ function minutes(time) { return Number(time.slice(0, 2)) * 60 + Number(time.slic
 function studentName(id) { return students.value.find(s => s.id === id)?.name || '已归档学生' }
 function paletteStyle(id) { return teacherStyle(id, teachers.value) }
 function isPast(item) { return new Date(`${item.date}T${item.startTime}:00`).getTime() <= Math.max(nowTick.value, Date.now()) }
-function canEdit(item) { return item.type === 'course' && (auth.isAdmin || !!auth.teacherId && auth.teacherId === item.teacherId) }
+function canEdit(item) { return item.type === 'course' && (auth.isAdmin || !!auth.teacherId && auth.teacherId === (item.ownerTeacherId || item.teacherId)) }
 function hasScheduleOverlap(item) {
   return allItems.value.some(other => other.id !== item.id && other.date === item.date && other.startTime < item.endTime && item.startTime < other.endTime)
 }
@@ -340,7 +352,7 @@ const allItems = computed(() => {
   }))
   return [...courses, ...trials]
 })
-const visibleItems = computed(() => allItems.value.filter(item => teacherFilter.value === 'all' || item.teacherId === auth.teacherId))
+const visibleItems = computed(() => allItems.value.filter(item => teacherFilter.value === 'all' || item.teacherId === auth.teacherId || item.ownerTeacherId === auth.teacherId))
 const teacherLegend = computed(() => {
   const byId = new Map()
   for (const item of visibleItems.value) if (item.teacherId) byId.set(item.teacherId, item.teacherName || teachers.value.find(t => t.id === item.teacherId)?.name || '教师')
@@ -456,6 +468,23 @@ async function openItem(item, chosen = false) {
   }
 }
 function selectOverlapItem(item) { showOverlap.value = false; openItem(item, true) }
+async function substitutionSaved() {
+  showDetail.value = false
+  toast.success('已安排本次代课，后续周次照常上课')
+  await refreshWeekAfterWrite('代课已保存')
+}
+async function removeSubstitution() {
+  if (cancellingSubstitution.value || !selectedItem.value || !canEdit(selectedItem.value)) return false
+  cancellingSubstitution.value = true
+  try {
+    await cancelSubstitution(selectedItem.value.courseId, selectedItem.value.originalDate)
+    showDetail.value = false; showCancelSubstitution.value = false
+    toast.success('已取消本次代课')
+    await refreshWeekAfterWrite('代课已取消')
+    return true
+  } catch (error) { toast.error(error.message); return false }
+  finally { cancellingSubstitution.value = false }
+}
 async function saveCourseDetails() {
   if (savingRoster.value) return
   if (!selectedItem.value || !canEdit(selectedItem.value) || isPast(selectedItem.value)) return
@@ -785,7 +814,8 @@ async function confirmRemoveAdjustment() {
 .week-empty p { margin-bottom: 10px; }
 .detail-section h3 { font-size: 15px; } .trial-student { padding: 6px 9px; background: #fff5e7; border-radius: 6px; }
 .trial-student span { color: var(--color-text-secondary); margin-left: 8px; }
-.detail-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.detail-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.substitution-label { margin-top: 8px; color: var(--color-primary-text); font-size: 13px; }
 .move-body { display: grid; gap: 12px; } .move-course { font-weight: 650; }
 .move-body > label, .move-times > label { display: grid; gap: 5px; }
 .end-time-preview { min-height: 34px; display: flex; align-items: center; font-size: 14px; }

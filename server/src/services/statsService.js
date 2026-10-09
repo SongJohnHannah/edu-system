@@ -11,7 +11,7 @@ function validateRange(start, end) {
 async function attendanceByTeacher(start, end) {
   validateRange(start, end)
   const [attendance] = await pool.execute(`
-    SELECT course_id, date, original_date, student_ids, hours_deducted, recorded_by
+    SELECT course_id, date, original_date, student_ids, hours_deducted, recorded_by, teaching_teacher_id
     FROM attendance WHERE date BETWEEN ? AND ? AND voided_at IS NULL
   `, [start, end])
   if (!attendance.length) return new Map()
@@ -30,9 +30,9 @@ async function attendanceByTeacher(start, end) {
 
   const totals = new Map()
   for (const row of attendance) {
-    const teacherId = row.original_date
+    const teacherId = row.teaching_teacher_id || (row.original_date
       ? occurrenceTeachers.get(`${row.course_id}:${iso(row.original_date)}`) || row.recorded_by
-      : legacyDateTeachers.get(`${row.course_id}:${iso(row.date)}`) || row.recorded_by
+      : legacyDateTeachers.get(`${row.course_id}:${iso(row.date)}`) || row.recorded_by)
     if (!teacherId) continue
     const current = totals.get(teacherId) || { attendanceCount: 0, consumedHours: 0 }
     const studentIds = typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : row.student_ids

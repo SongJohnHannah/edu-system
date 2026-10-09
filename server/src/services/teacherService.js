@@ -3,7 +3,7 @@ import { generateId } from '../utils/helpers.js'
 import * as authService from './authService.js'
 import { formatDateTime } from '../utils/dateFormat.js'
 import { randomBytes } from 'node:crypto'
-import { acquireScheduleLock, closeScheduleConnection, futureTrialWindow } from './scheduleService.js'
+import { acquireScheduleLock, closeScheduleConnection, futureTrialWindow, iso, listOccurrences } from './scheduleService.js'
 import { acquireTeacherIdentityLock, closeTeacherIdentityConnection } from './teacherIdentityLock.js'
 
 function formatTeacher(row) {
@@ -201,6 +201,14 @@ export async function updateStatus(id, status) {
         [id, ...future.params]
       )
       if (trials.length) throw Object.assign(new Error('请先处理该教师未来的试听预约'), { status: 409 })
+      const [substitutions] = await conn.execute(`SELECT s.id, COALESCE(m.target_date, s.original_date) AS actual_date FROM course_substitutions s
+        JOIN courses c ON c.id = s.course_id LEFT JOIN course_occurrence_changes m ON m.course_id = s.course_id AND m.original_date = s.original_date
+        WHERE s.teacher_id = ? AND s.status = 'active' AND c.archived_at IS NULL
+        AND COALESCE(m.target_date, s.original_date) >= ?`, [id, future.params[0]])
+      const futureSubstitution = substitutions.some(row => iso(row.actual_date) > future.params[0])
+      const todaySubstitution = substitutions.length && (await listOccurrences(future.params[0], future.params[0], conn))
+        .some(row => row.substitution && row.teacherId === id && row.startTime > future.params[2])
+      if (futureSubstitution || todaySubstitution) throw Object.assign(new Error('请先处理该教师未来的临时代课'), { status: 409 })
     }
     await conn.execute('UPDATE teachers SET status = ? WHERE id = ?', [status, id])
     await conn.execute('UPDATE users SET is_active = ? WHERE teacher_id = ?', [status === 'active', id])

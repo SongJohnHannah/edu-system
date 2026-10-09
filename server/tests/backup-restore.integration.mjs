@@ -37,6 +37,7 @@ try {
   await pool.execute("INSERT INTO settings (setting_key, setting_value) VALUES ('office', '测试教室')")
   await pool.execute("INSERT INTO classes (id, name) VALUES ('class-1', '测试班级')")
   await pool.execute("INSERT INTO teachers (id, name, status) VALUES ('teacher-1', '测试老师', 'active')")
+  await pool.execute("INSERT INTO teachers (id, name, status) VALUES ('teacher-2', '代课老师', 'active')")
   await pool.execute("INSERT INTO users (id, username, password_hash, role, teacher_id, display_name) VALUES ('user-1', 'backup-test', 'test-hash', 'teacher', 'teacher-1', '测试老师')")
   await pool.execute("INSERT INTO students (id, name, created_by, enrollment_stage) VALUES ('student-1', '正式学生', 'admin', 'enrolled'), ('student-2', '试听学生', 'admin', 'pending')")
   await pool.execute("INSERT INTO courses (id, name, teacher_id, weekday, start_time, end_time, student_ids, effective_start_date) VALUES ('course-1', '阅读课程', 'teacher-1', 1, '09:00', '10:00', '[\"student-1\"]', '2099-01-04')")
@@ -49,9 +50,13 @@ try {
   await pool.execute("INSERT INTO attendance_reversals (id, attendance_id, student_id, hours) VALUES ('reversal-1', 'attendance-1', 'student-1', 1)")
   await pool.execute("INSERT INTO hour_records (id, student_id, type, hours, related_id, operator) VALUES ('hour-1', 'student-1', 'restore', 1, 'attendance-1', 'backup-test')")
   await pool.execute("INSERT INTO course_handovers (id, course_id, course_name, old_teacher_id, old_teacher_name, new_teacher_id, new_teacher_name, performed_by) VALUES ('handover-1', 'course-1', '阅读课程', 'teacher-1', '测试老师', 'teacher-1', '测试老师', 'backup-test')")
+  await pool.execute(`INSERT INTO course_substitutions (id, course_id, original_date, teacher_id, original_teacher_id, reason, arranged_by, confirmed_conflicts)
+    VALUES ('substitute-1', 'course-1', '2099-01-05', 'teacher-2', 'teacher-1', '临时有事;记录', 'backup-test', ?)`,
+  [JSON.stringify([{ id: 'conflict-1', type: 'teacher_overlap', date: '2099-01-06', time: '09:00—10:00', student: '冲突课', teacher: '代课老师' }])])
+  await pool.execute("UPDATE attendance SET teaching_teacher_id = 'teacher-2' WHERE id = 'attendance-1'")
 
   const snapshot = await backup.exportData()
-  assert.equal(snapshot.version, '5.0')
+  assert.equal(snapshot.version, '6.0')
   for (const table of backup.backupTables) assert.ok(snapshot.data.tables[table].length > 0, `${table} should be backed up`)
   const sql = await backup.exportSQL()
 
@@ -89,7 +94,17 @@ try {
   await assert.rejects(backup.importData({ version: '5.0', data: { tables: { students: [] } } }), /新版备份文件不完整/)
   await assert.rejects(backup.importSQL('-- 嘉言思听教务系统 SQL 备份 v5\nDELETE FROM students;'), /新版 SQL 备份文件不完整/)
   await assertRestored()
-  process.stdout.write('isolated backup restore passed: SQL, JSON, rollback, all tables\n')
+  const oldTables = { ...snapshot.data.tables }
+  delete oldTables.course_substitutions
+  await backup.importData({ version: '5.0', data: { tables: oldTables } })
+  assert.equal((await pool.execute('SELECT COUNT(*) AS total FROM course_substitutions'))[0][0].total, 0)
+  const oldSQL = sql.replace('SQL 备份 v6', 'SQL 备份 v5').split('\n').filter(line => !/^(DELETE FROM|INSERT INTO) course_substitutions\b/.test(line)).join('\n')
+  await backup.importSQL(sql)
+  await backup.importSQL(oldSQL)
+  assert.equal((await pool.execute('SELECT COUNT(*) AS total FROM course_substitutions'))[0][0].total, 0)
+  await backup.importSQL(sql)
+  await assertRestored()
+  process.stdout.write('isolated backup restore passed: v6 SQL/JSON all fields, v5 compatibility, rollback, all tables\n')
 } finally {
   if (pool) await pool.end()
   if (migration) await migration.end()

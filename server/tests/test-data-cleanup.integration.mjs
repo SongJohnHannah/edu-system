@@ -36,6 +36,11 @@ try {
   await migration.execute("INSERT INTO teachers (id,name,status,is_test) VALUES ('main-t','正常教师','active',0),('test-t','测试教师','active',1)")
   await migration.execute("INSERT INTO students (id,name,created_by,enrollment_stage,is_test) VALUES ('main-s','正常学生','admin','pending',0),('test-s','测试学生','admin','pending',1)")
   await migration.execute("INSERT INTO courses (id,name,teacher_id,weekday,start_time,end_time,student_ids,is_test) VALUES ('main-c','正常课程','main-t',1,'09:00','10:00','[]',0),('test-c','测试课程','test-t',2,'11:00','12:00','[]',1)")
+  await migration.execute(`INSERT INTO course_substitutions (id,course_id,original_date,teacher_id,original_teacher_id,arranged_by) VALUES
+    ('test-sub-course','test-c','2099-01-06','main-t','test-t','cleanup-test'),
+    ('test-sub-teacher','main-c','2099-01-05','test-t','main-t','cleanup-test'),
+    ('test-sub-original','main-c','2099-01-12','main-t','test-t','cleanup-test'),
+    ('main-sub','main-c','2099-01-19','main-t','main-t','cleanup-test')`)
   await migration.execute("INSERT INTO trial_bookings (id,student_id,teacher_id,course_id,occurrence_date,booking_date,start_time,end_time,student_name_snapshot,teacher_name_snapshot,is_test) VALUES ('main-b','main-s','main-t','main-c','2099-01-05','2099-01-05','09:00','10:00','正常学生','正常教师',0),('test-b','test-s','test-t','test-c','2099-01-06','2099-01-06','11:00','12:00','测试学生','测试教师',0)")
   await migration.execute("INSERT INTO trial_bookings (id,student_id,teacher_id,course_id,occurrence_date,booking_date,start_time,end_time,student_name_snapshot,teacher_name_snapshot,is_test) VALUES ('test-student-b','test-s','main-t','main-c','2099-01-12','2099-01-12','09:00','10:00','测试学生','正常教师',0),('test-teacher-b','main-s','test-t','main-c','2099-01-13','2099-01-13','09:00','10:00','正常学生','测试教师',0),('test-course-b','main-s','main-t','test-c','2099-01-14','2099-01-14','11:00','12:00','正常学生','正常教师',0)")
   await migration.execute("INSERT INTO course_schedule_versions (id,course_id,effective_week_start,weekday,start_time,end_time) VALUES ('test-v','test-c','2099-01-04',2,'11:00','12:00')")
@@ -67,6 +72,10 @@ try {
   const result = await response.json()
   assert.equal(result.deleted.trial_bookings, 4)
   assert.equal(result.deleted.attendance, 2)
+  for (const id of ['test-sub-course', 'test-sub-teacher', 'test-sub-original']) {
+    assert.equal((await pool.execute('SELECT COUNT(*) AS total FROM course_substitutions WHERE id = ?', [id]))[0][0].total, 0)
+  }
+  assert.equal((await pool.execute("SELECT COUNT(*) AS total FROM course_substitutions WHERE id = 'main-sub'"))[0][0].total, 1)
 
   for (const [table, id] of [['users', 'test-u'], ['teachers', 'test-t'], ['students', 'test-s'], ['courses', 'test-c'], ['trial_bookings', 'test-b'], ['trial_bookings', 'test-student-b'], ['trial_bookings', 'test-teacher-b'], ['trial_bookings', 'test-course-b'], ['course_schedule_versions', 'test-v'], ['attendance', 'test-a'], ['attendance', 'test-a-unflagged'], ['attendance_reversals', 'test-r'], ['attendance_reversals', 'test-r-unflagged'], ['hour_records', 'test-h'], ['hour_records', 'test-h-unflagged'], ['hour_records', 'test-add'], ['course_handovers', 'test-o'], ['course_handovers', 'test-o-flagged']]) {
     const [[row]] = await pool.execute(`SELECT COUNT(*) AS total FROM ${table} WHERE id = ?`, [id])

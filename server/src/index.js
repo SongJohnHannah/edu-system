@@ -70,6 +70,9 @@ app.delete(`${API_PREFIX}/admin/test-data`, verifyToken, requireRole('admin'), a
   try {
     await conn.beginTransaction()
     for (const table of ['course_detail_versions', 'course_schedule_versions', 'course_occurrence_changes', 'course_roster_versions']) await conn.execute(`DELETE v FROM ${table} v JOIN courses c ON v.course_id = c.id WHERE c.is_test = 1`)
+    await conn.execute(`DELETE s FROM course_substitutions s LEFT JOIN courses c ON c.id = s.course_id
+      LEFT JOIN teachers t ON t.id = s.teacher_id LEFT JOIN teachers o ON o.id = s.original_teacher_id
+      WHERE c.is_test = 1 OR t.is_test = 1 OR o.is_test = 1`)
     await conn.execute(`DELETE ar FROM attendance_reversals ar
       JOIN attendance a ON ar.attendance_id = a.id
       LEFT JOIN courses c ON a.course_id = c.id WHERE a.is_test = 1 OR c.is_test = 1`)

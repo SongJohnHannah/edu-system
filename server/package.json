@@ -9,6 +9,7 @@
     "start": "node src/index.js",
     "test": "node tests/schedule.unit.mjs && node tests/backup.unit.mjs && node tests/student-enrollment.unit.mjs && node tests/student-hours.unit.mjs && node tests/student-batch.unit.mjs && node tests/attendance-history.unit.mjs && node tests/write-permissions.unit.mjs && node tests/trial-time.unit.mjs && node tests/teacher-status.unit.mjs && node tests/future-trial-impact.unit.mjs && node tests/trial-postcommit.unit.mjs && node tests/teacher-postcommit.unit.mjs && node tests/account-postcommit.unit.mjs && node tests/handover-postcommit.unit.mjs",
     "test:integration": "node tests/sharedSchedule.integration.mjs",
+    "test:substitution-integration": "node tests/substitution.integration.mjs",
     "test:cleanup-integration": "node tests/test-data-cleanup.integration.mjs",
     "test:backup-integration": "node tests/backup-restore.integration.mjs",
     "test:account-integration": "node tests/account.integration.mjs",
