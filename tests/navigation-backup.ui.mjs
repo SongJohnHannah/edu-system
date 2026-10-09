@@ -1,9 +1,9 @@
 import { chromium } from '@playwright/test'
 
 const desktopRouteOrder = ['/', '/students', '/weekly-schedule', '/trial-bookings', '/attendance', '/courses', '/calendar', '/teachers', '/teacher-stats', '/handovers']
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({ headless: true, channel: process.env.UI_BROWSER_CHANNEL || undefined })
 try {
-  for (const [width, height] of [[1440, 900], [1024, 768], [956, 440], [844, 390], [390, 844], [320, 700]]) for (const role of ['admin', 'teacher']) {
+  for (const [width, height] of [[1440, 900], [1024, 768], [768, 1024], [700, 900], [600, 900], [956, 440], [844, 390], [390, 844], [320, 700]]) for (const role of ['admin', 'teacher']) {
     const context = await browser.newContext({ viewport: { width, height }, hasTouch: width < 1024, acceptDownloads: true })
     await context.addInitScript(currentRole => {
       localStorage.setItem('access_token', 'navigation-test')
@@ -57,8 +57,21 @@ try {
         const missingActionIcons = await page.locator('.mobile-more-menu button:not(:has(svg))').allTextContents()
         if (missingActionIcons.length) throw new Error(`${width}px ${role} 手机更多操作缺少图标：${missingActionIcons.join(', ')}`)
       } else {
-        if (width <= 1240) await page.getByRole('button', { name: '打开导航' }).click()
+        if (await page.getByRole('button', { name: '打开导航' }).count()) throw new Error(`${width}px PC/iPad 导航仍需多点一次打开`)
         const nav = page.locator('.desktop-nav .nav')
+        for (const label of ['首页', '学生', '周排课', '试听预约', '点名']) {
+          if (!await nav.getByRole('link', { name: label, exact: true }).isVisible()) throw new Error(`${width}px ${label} 没有直接显示`)
+        }
+        const header = page.locator('.header-content')
+        const regions = await Promise.all(['.logo', '.nav', '.header-actions'].map(selector => header.locator(selector).boundingBox()))
+        if (regions.some(box => !box || box.x < 0 || box.x + box.width > width + 1)) throw new Error(`${width}px 导航超出屏幕`)
+        for (let i = 0; i < regions.length; i++) for (let j = i + 1; j < regions.length; j++) {
+          const a = regions[i], b = regions[j]
+          if (Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > 1 &&
+              Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) > 1) throw new Error(`${width}px 导航与品牌或账户重叠`)
+        }
+        if (width >= 700 && (await header.boundingBox()).height > 65) throw new Error(`${width}px 导航没有保持一行`)
+        if (process.env.NAV_SCREENSHOTS === '1' && role === 'admin') await page.screenshot({ path: `.qa/navigation-${width}.png`, animations: 'disabled' })
         await nav.getByRole('button', { name: '更多' }).click()
         await nav.getByRole('link', { name: '教师统计' }).waitFor({ state: 'visible' })
         if (!await nav.getByRole('link', { name: '课程安排' }).isVisible()) throw new Error('桌面更多菜单缺少课程入口')
@@ -124,7 +137,7 @@ try {
       await context.close()
     }
   }
-  console.log('全局导航与备份：PC/iPad/含 956px 宽屏的手机竖横屏两角色入口、导出、恢复确认和失败反馈通过')
+  console.log('全局导航与备份：PC/iPad 直接导航、600px 窄屏换行、手机竖横屏两角色顺序与图标、导出、恢复确认和失败反馈通过')
 } finally {
   await browser.close()
 }

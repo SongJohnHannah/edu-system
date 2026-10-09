@@ -11,8 +11,7 @@
           <BrandLogo />
           <span class="logo-text">教务系统</span>
         </div>
-        <button class="tablet-menu-btn" type="button" :aria-expanded="showTabletNav" @click="showTabletNav = !showTabletNav">{{ showTabletNav ? '收起导航' : '打开导航' }}</button>
-        <nav class="nav" :class="{ 'tablet-open': showTabletNav }">
+        <nav class="nav">
           <AppNavLink v-for="item in primaryNavItems" :key="item.to" :item="item" link-class="nav-item" active-class="active" />
           <div class="nav-more">
             <button class="nav-item nav-more-btn" :class="{ active: showNavMore || moreNavActive }" :aria-expanded="showNavMore" @click.stop="showNavMore = !showNavMore; showAccountMenu = false">
@@ -179,7 +178,6 @@ const showBackupModal = ref(false)
 const showMoreMenu = ref(false)
 const showNavMore = ref(false)
 const showAccountMenu = ref(false)
-const showTabletNav = ref(false)
 const importResult = ref(null)
 const pendingImport = ref(null)
 const importing = ref(false)
@@ -188,7 +186,6 @@ watch(() => router.currentRoute.value.path, () => {
   showMoreMenu.value = false
   showNavMore.value = false
   showAccountMenu.value = false
-  showTabletNav.value = false
 })
 const appVersion = __APP_VERSION__
 
@@ -221,7 +218,6 @@ function closeMenusOnEscape(e) {
   showNavMore.value = false
   showAccountMenu.value = false
   showMoreMenu.value = false
-  showTabletNav.value = false
 }
 onMounted(() => document.addEventListener('click', closeDropdowns))
 onUnmounted(() => document.removeEventListener('click', closeDropdowns))
@@ -375,7 +371,6 @@ async function confirmImport() {
   flex-wrap: nowrap;
   overflow: visible;
 }
-.tablet-menu-btn { display: none; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: white; color: var(--color-text); padding: 8px 12px; font: inherit; cursor: pointer; }
 
 .nav-item {
   padding: 8px 12px;
@@ -451,7 +446,7 @@ async function confirmImport() {
 .account-menu { position: relative; }
 .account-trigger { display: inline-flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: white; color: var(--color-text-secondary); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .account-trigger:hover, .account-trigger[aria-expanded="true"] { background: var(--color-bg-secondary); color: var(--color-text); }
-.account-trigger:focus-visible, .nav-more-btn:focus-visible, .tablet-menu-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.account-trigger:focus-visible, .nav-more-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .account-dropdown { position: absolute; top: calc(100% + 7px); right: 0; z-index: 200; min-width: 188px; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: white; box-shadow: var(--shadow-lg); }
 .account-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 13px 15px; border-bottom: 1px solid var(--color-border); color: var(--color-text); font-size: 13px; }
 .account-summary strong { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -635,12 +630,14 @@ button.more-item { width: 100%; border: 0; background: white; text-align: left; 
 }
 
 @media (min-width: 600px) and (max-width: 1240px) {
-  .header-content { min-height: 56px; height: auto; flex-wrap: wrap; }
-  .tablet-menu-btn { display: inline-flex; margin-left: auto; margin-right: 12px; }
-  .nav { display: none; order: 3; width: 100%; flex-wrap: wrap; padding: 0 0 12px; }
-  .nav.tablet-open { display: flex; }
+  .header-content { min-height: 56px; height: auto; column-gap: 16px; }
   .logo, .header-actions { min-height: 56px; }
   .main { padding: 24px 20px; }
+}
+
+@media (min-width: 600px) and (max-width: 699px) {
+  .header-content { flex-wrap: wrap; }
+  .nav { order: 3; width: 100%; justify-content: center; padding-bottom: 10px; }
 }
 
 /* ===== 手机底部导航 ===== */
