@@ -109,8 +109,8 @@
               />
             </div>
             <div class="form-group">
-              <label>结束时间 *</label>
-              <OfficeInput class="input" type="text" :model-value="formEndTime" readonly placeholder="根据开始时间和课时自动计算" />
+              <label>结束时间（自动计算）</label>
+              <OfficeInput class="input" type="text" :model-value="formEndTime" readonly disabled input-aria-label="结束时间（自动计算）" placeholder="根据开始时间和课时自动计算" />
             </div>
           </div>
           <p class="schedule-hint">结束时间按开始时间＋课时自动计算，0.5 课时为 30 分钟。<template v-if="editingCourse">时间修改应用于后续每周课程；单次调课和修改星期请到 <router-link to="/weekly-schedule" @click="closeModal">周排课</router-link>。</template></p>

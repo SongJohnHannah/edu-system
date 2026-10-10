@@ -75,7 +75,7 @@
         </div>
         <div class="stat-info">
           <span class="stat-value">{{ overallStats.totalConsumedHours }}</span>
-          <span class="stat-label">消耗课时</span>
+          <span class="stat-label">教师授课课时</span>
         </div>
       </div>
     </div>
@@ -83,16 +83,17 @@
     <!-- 教师工作量列表 -->
     <div class="section">
       <h2 class="section-title">教师工作量明细</h2>
+      <p class="stats-explanation">授课课时按本期有效点名记录累加，每次计算该课次课时，不乘学生人数；临时代课计入实际授课老师。名下课程和学生按当前课程归属统计。</p>
       <div class="table-container">
         <OfficeTable class="table">
           <thead>
             <tr>
               <th>教师</th>
               <th>教授科目</th>
-              <th>授课课程数</th>
-              <th>授课学生数</th>
+              <th>名下课程数</th>
+              <th>名下学生数</th>
               <th>点名次数</th>
-              <th>消耗课时</th>
+              <th>授课课时</th>
             </tr>
           </thead>
           <tbody>
@@ -443,6 +444,8 @@ onUnmounted(() => {
   color: var(--color-text);
   margin-bottom: 16px;
 }
+
+.stats-explanation { margin: -4px 0 16px; color: var(--color-text-secondary); font-size: 13px; line-height: 1.7; }
 
 .table-container {
   background: white;

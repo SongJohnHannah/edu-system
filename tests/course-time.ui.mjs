@@ -47,6 +47,7 @@ try {
       async function endIsReadOnly(input, expected) {
         assert.equal(await input.inputValue(), expected)
         assert.equal(await input.evaluate(element => element.readOnly), true)
+        assert.equal(await input.isDisabled(), true)
       }
       await page.goto('http://127.0.0.1:4174/courses')
       await page.getByRole('button', { name: '创建课程' }).click()
@@ -64,6 +65,7 @@ try {
       const card = page.locator('.course-card').filter({ has: page.getByRole('heading', { name: '阅读课', exact: true }) })
       await card.getByRole('button', { name: '编辑', exact: true }).click()
       const edit = page.locator('.modal').filter({ has: page.getByRole('heading', { name: '编辑课程' }) })
+      await edit.getByText('结束时间（自动计算）', { exact: true }).waitFor({ state: 'visible' })
       await edit.locator('.hours-amount input').fill('1.5')
       await choose(edit.locator('.time-row .search-select'), '10:00')
       await endIsReadOnly(edit.locator('.time-row .form-group').last().locator('input'), '11:30')
@@ -86,6 +88,7 @@ try {
       assert.deepEqual([writes[2].body.startTime, writes[2].body.endTime, writes[2].body.hoursPerClass], ['09:30', '10:00', 0.5])
       await page.locator(width < 600 ? '.agenda-card' : '.course-bar').first().click()
       const detail = page.locator('.detail-modal').filter({ has: page.getByRole('heading', { name: '课程资料', exact: true }) })
+      await detail.getByText('结束时间（自动计算）', { exact: true }).waitFor({ state: 'visible' })
       const detailHours = detail.locator('label').filter({ hasText: '每次课时' }).locator('input')
       await detailHours.fill('2')
       await detailHours.press('Tab')

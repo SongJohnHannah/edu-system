@@ -122,7 +122,7 @@
           </div>
           <div class="stat-info">
             <span class="stat-value">{{ todayUsedHours }}</span>
-            <span class="stat-label">今日消耗课时</span>
+            <span class="stat-label">今日学生消耗课时</span>
           </div>
         </router-link>
 
