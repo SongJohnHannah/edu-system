@@ -56,7 +56,7 @@ try {
       if (!await page.getByText('试听学生 · 林老师').isVisible()) throw new Error(`${width}px ${role}: 今日试听遗漏`)
       const trialLink = await page.locator('.trial-today-item').filter({ hasText: '试听学生 · 林老师' }).getAttribute('href')
       if (trialLink !== `/trial-bookings?date=${date}&booking=b1`) throw new Error(`${width}px ${role}: 今日试听不能定位预约`)
-      const expected = [['今日上课学生', '2'], ['今日上课教师', '2'], ['今日课程', '2'], ['今日消耗课时', '3'], ['今日点名', '1'], ['本月点名', '1']]
+      const expected = [['今日上课学生', '2'], ['今日上课教师', '2'], ['今日课程', '2'], ['今日学生消耗课时', '3'], ['今日点名', '1'], ['本月点名', '1']]
       for (const [label, value] of expected) {
         const actual = (await page.locator('.stat-card').filter({ hasText: label }).locator('.stat-value').textContent()).trim()
         if (actual !== value) throw new Error(`${width}px ${role}: ${label} 应为 ${value}，实际 ${actual}`)

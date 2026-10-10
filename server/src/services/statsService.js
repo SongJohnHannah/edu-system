@@ -11,7 +11,7 @@ function validateRange(start, end) {
 async function attendanceByTeacher(start, end) {
   validateRange(start, end)
   const [attendance] = await pool.execute(`
-    SELECT course_id, date, original_date, student_ids, hours_deducted, recorded_by, teaching_teacher_id
+    SELECT course_id, date, original_date, hours_deducted, recorded_by, teaching_teacher_id
     FROM attendance WHERE date BETWEEN ? AND ? AND voided_at IS NULL
   `, [start, end])
   if (!attendance.length) return new Map()
@@ -35,9 +35,10 @@ async function attendanceByTeacher(start, end) {
       : legacyDateTeachers.get(`${row.course_id}:${iso(row.date)}`) || row.recorded_by)
     if (!teacherId) continue
     const current = totals.get(teacherId) || { attendanceCount: 0, consumedHours: 0 }
-    const studentIds = typeof row.student_ids === 'string' ? JSON.parse(row.student_ids) : row.student_ids
     current.attendanceCount++
-    current.consumedHours += Number(row.hours_deducted ?? 1) * studentIds.length
+    // Attendance saves the class hours at roll call. Each valid class counts once,
+    // independently of student deductions and later course/roster changes.
+    current.consumedHours = Math.round((current.consumedHours + Number(row.hours_deducted ?? 1)) * 100) / 100
     totals.set(teacherId, current)
   }
   return totals
@@ -124,6 +125,6 @@ export async function getOverallStats(startDate, endDate, teacherScope) {
     activeTeachers: totals.length,
     totalCourses: totalCourses || 0,
     totalAttendance: totals.reduce((sum, item) => sum + item.attendanceCount, 0),
-    totalConsumedHours: totals.reduce((sum, item) => sum + item.consumedHours, 0)
+    totalConsumedHours: Math.round(totals.reduce((sum, item) => sum + item.consumedHours, 0) * 100) / 100
   }
 }

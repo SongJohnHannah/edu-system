@@ -124,7 +124,7 @@
               <label>教室 <OfficeInput v-model.trim="courseEdit.classroom" class="detail-input" type="text" maxlength="100" :disabled="loadingCourseEdit || !!courseEditError" /></label>
               <label>每次课时 <OfficeInput v-model.number="courseEdit.hoursPerClass" class="detail-input" type="number" min="0.5" max="999.5" step="0.5" :disabled="loadingCourseEdit || !!courseEditError" /></label>
               <label>开始时间 <NSelect v-model:value="courseEdit.startTime" :options="timeOptions" :disabled="loadingCourseEdit || !!courseEditError" /></label>
-              <label>结束时间 <OfficeInput :model-value="editEndTime" class="detail-input" type="text" readonly placeholder="根据开始时间和课时自动计算" /></label>
+              <label>结束时间（自动计算） <OfficeInput :model-value="editEndTime" class="detail-input" type="text" readonly disabled placeholder="根据开始时间和课时自动计算" /></label>
               <p class="hint">0.5 课时为 30 分钟，结束时间自动计算。资料中的时间修改应用于后续每周课程。</p>
             </template>
             <p v-else>{{ selectedItem.classroom || '未设置教室' }} · 每次 {{ selectedItem.hoursPerClass ?? 1 }} 课时</p>
@@ -169,7 +169,7 @@
         <label>授课教师 <NSelect v-model:value="createForm.teacherId" :options="createTeacherOptions" filterable placeholder="选择教师" /></label>
         <label>开始排课 <NSelect v-model:value="createForm.startWeek" :options="createWeekOptions" /></label>
         <label>上课星期 <NSelect v-model:value="createForm.weekday" :options="weekdayOptions" /></label>
-        <div class="move-times"><label>开始时间 <NSelect v-model:value="createForm.startTime" :options="timeOptions" /></label><label>结束时间 <OfficeInput :model-value="createEndTime" class="detail-input" type="text" readonly placeholder="根据开始时间和课时自动计算" /></label></div>
+        <div class="move-times"><label>开始时间 <NSelect v-model:value="createForm.startTime" :options="timeOptions" /></label><label>结束时间（自动计算） <OfficeInput :model-value="createEndTime" class="detail-input" type="text" readonly disabled placeholder="根据开始时间和课时自动计算" /></label></div>
         <label>教室 <OfficeInput v-model.trim="createForm.classroom" class="detail-input" type="text" placeholder="可选" maxlength="100" /></label>
         <label>每次课时 <OfficeInput v-model.number="createForm.hoursPerClass" class="detail-input" type="number" min="0.5" max="999.5" step="0.5" /></label>
         <p class="hint">结束时间＝开始时间＋课时，0.5 课时为 30 分钟。</p>
@@ -185,7 +185,7 @@
         <label>新日期 <OfficeDatePicker v-model="move.targetDate" :min="moveMinDate" :max="moveMaxDate" @change="keepWithinWeek" /></label>
         <div class="move-times">
           <label>开始时间 <NSelect v-model:value="move.startTime" :options="timeOptions" @update:value="keepDuration" /></label>
-          <label>结束时间 <strong class="end-time-preview">{{ move.endTime }}</strong></label>
+          <label>结束时间（自动计算） <strong class="end-time-preview">{{ move.endTime }}</strong></label>
         </div>
         <label>请选择调整范围（必选）</label>
         <NRadioGroup v-model:value="move.scope">
