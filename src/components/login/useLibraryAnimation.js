@@ -1,15 +1,19 @@
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { createLibraryScene } from './libraryScene.js'
 
-export function useLibraryAnimation(canvasRef, backdropUrl) {
+export function useLibraryAnimation(canvasRef, backdropUrl, theme) {
   const ready = ref(false)
   const playing = ref(true)
+  const hotspot = shallowRef(null)
   let image, preference, observer, context, scene
   let frame = 0, lastDraw = 0, previous = 0, elapsed = 0
   let width = 0, height = 0, destroyed = false
 
   function draw() {
-    if (scene && width && height) scene.draw(width, height, elapsed / 1000)
+    if (!scene || !width || !height) return
+    const next = scene.draw(width, height, elapsed / 1000)
+    const previousBox = hotspot.value
+    if (!next || !previousBox || Object.keys(next).some(key => next[key] !== previousBox[key])) hotspot.value = next
   }
 
   function tick(now) {
@@ -54,30 +58,45 @@ export function useLibraryAnimation(canvasRef, backdropUrl) {
     draw()
   }
 
+  function loadBackdrop() {
+    if (destroyed || !context) return
+    if (image) image.onload = image.onerror = null
+    const nextImage = new Image()
+    image = nextImage
+    ready.value = false
+    hotspot.value = null
+    elapsed = 0
+    scene?.dispose()
+    scene = createLibraryScene(context, nextImage, theme.value)
+    syncAnimation()
+    nextImage.onload = () => {
+      if (destroyed || image !== nextImage) return
+      ready.value = true
+      draw()
+      syncAnimation()
+    }
+    nextImage.onerror = () => {
+      if (destroyed || image !== nextImage) return
+      ready.value = true
+      draw()
+    }
+    // Only the selected scene is requested; the other background stays unloaded.
+    nextImage.src = backdropUrl.value
+  }
+
+  watch([backdropUrl, theme], loadBackdrop)
+
   onMounted(() => {
     context = canvasRef.value.getContext('2d', { alpha: false })
     if (!context) return
-    image = new Image()
-    scene = createLibraryScene(context, image)
     preference = window.matchMedia('(prefers-reduced-motion: reduce)')
     playing.value = !preference.matches
     observer = new ResizeObserver(resize)
     observer.observe(canvasRef.value)
     preference.addEventListener('change', syncPreference)
     document.addEventListener('visibilitychange', syncAnimation)
-    image.onload = () => {
-      if (destroyed) return
-      draw()
-      ready.value = true
-      syncAnimation()
-    }
-    image.onerror = () => {
-      if (destroyed) return
-      draw()
-      ready.value = true
-    }
     resize()
-    image.src = backdropUrl
+    loadBackdrop()
   })
 
   onBeforeUnmount(() => {
@@ -90,5 +109,5 @@ export function useLibraryAnimation(canvasRef, backdropUrl) {
     scene?.dispose()
   })
 
-  return { ready, playing, toggleMotion }
+  return { ready, playing, hotspot, toggleMotion }
 }

@@ -20,8 +20,9 @@ export function createLibraryActors(context) {
   function bearPaint(x,floor,scale,time,direction=1,cheer=false,blinkOverride) {
     ctx.save(); ctx.translate(Math.round(x/2)*2,Math.round(floor/2)*2); ctx.scale(scale,scale);
     ctx.translate(direction<0?80:0,0); ctx.scale(direction,1);
-    const run=!cheer, bounce=run?Math.round(Math.sin(time*13)*2):0;
-    ctx.translate(0,-118+bounce);
+    const run=!cheer;
+    // Keep the feet on the supplied floor; the stride provides walking motion.
+    ctx.translate(0,-118);
     const amber='#e48c37', light='#f6ae51', shade='#ad5726', cream='#ffe7bb', outline='#61301c';
     if(run) { r(-4,73,17,28,'#6f9478'); r(-1,74,6,25,'#9eb498'); r(2,78,4,14,'#cbd5b4'); }
     block(20,70,43,38,outline,8); block(22,70,39,36,amber,6); block(31,76,23,23,cream,6);
