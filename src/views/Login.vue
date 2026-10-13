@@ -1,11 +1,6 @@
 <template>
   <div class="login-page">
-    <div class="login-media" aria-hidden="true">
-      <video ref="videoElement" class="login-video" autoplay muted loop playsinline preload="metadata" :poster="loginPoster">
-        <source :src="loginVideo" type="video/mp4" />
-      </video>
-    </div>
-    <div class="login-tint" aria-hidden="true"></div>
+    <LibraryScene />
     <div class="login-card">
       <form class="login-form" aria-label="登录" @submit.prevent="handleLogin">
         <div class="form-group">
@@ -33,7 +28,7 @@
           />
         </div>
 
-        <p class="login-error" v-if="errorMsg">{{ errorMsg }}</p>
+        <p class="login-error" role="alert" v-if="errorMsg">{{ errorMsg }}</p>
 
         <OfficeButton type="submit" class="btn login-btn" :disabled="loading">
           <span v-if="loading" class="login-spinner"></span>
@@ -45,11 +40,10 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
-import loginVideo from '../assets/login-scene.mp4'
-import loginPoster from '../assets/login-scene-poster.webp'
+import LibraryScene from '../components/login/LibraryScene.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -58,22 +52,6 @@ const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
-const videoElement = ref(null)
-let motionPreference
-
-function syncMotionPreference() {
-  if (motionPreference.matches) videoElement.value?.pause()
-  else videoElement.value?.play().catch(() => {})
-}
-
-onMounted(() => {
-  motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
-  motionPreference.addEventListener('change', syncMotionPreference)
-  syncMotionPreference()
-})
-
-onBeforeUnmount(() => motionPreference?.removeEventListener('change', syncMotionPreference))
-
 async function handleLogin() {
   if (loading.value) return
   errorMsg.value = ''
@@ -100,49 +78,36 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #dceaf4;
+  background: #171c23;
   padding: 32px clamp(32px, 5.5vw, 96px);
-}
-
-.login-media,
-.login-tint {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.login-media {
-  z-index: -2;
-  background: #dceaf4 url('../assets/login-scene-poster.webp') center / cover no-repeat;
-}
-
-.login-video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center;
-}
-
-.login-tint {
-  z-index: -1;
-  background:
-    linear-gradient(90deg, transparent 42%, rgba(241, 247, 251, .22) 66%, rgba(241, 247, 251, .62) 100%),
-    linear-gradient(180deg, rgba(243, 248, 251, .04), rgba(236, 244, 249, .16));
 }
 
 .login-card {
   position: relative;
-  background: rgba(255, 255, 255, .27);
-  border: 1px solid rgba(255, 255, 255, .5);
-  backdrop-filter: blur(8px) saturate(108%);
-  -webkit-backdrop-filter: blur(8px) saturate(108%);
-  border-radius: 16px;
-  box-shadow: 0 16px 46px rgba(44, 75, 111, .14);
+  z-index: 1;
+  background: linear-gradient(135deg, #18374a, #102333);
+  border: 1px solid #c29a4a;
+  border-radius: 3px;
+  box-shadow: 0 0 0 2px #352c1d, 0 0 0 3px #8e6b32, 3px 4px #100e13,
+    inset 1px 1px #63818a, inset -1px -1px #081b29;
   padding: 18px 19px 20px;
   width: 100%;
   max-width: 276px;
 }
+
+.login-card::before,
+.login-card::after {
+  content: '';
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 1px solid #e6c57b;
+  background: #bb8d35;
+  box-shadow: inset 2px 2px #eccd87, inset -2px -2px #735021;
+  pointer-events: none;
+}
+.login-card::before { top: -3px; left: -3px; }
+.login-card::after { right: -3px; bottom: -3px; }
 
 .login-form {
   display: flex;
@@ -161,41 +126,44 @@ async function handleLogin() {
   padding: 0;
   font-size: 13px;
   border: none;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .48);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  border-radius: 2px;
+  background: #0b202f;
+  box-shadow: inset 1px 1px #04111c;
   transition: var(--transition);
   outline: none;
   font-family: inherit;
-  color: var(--color-text);
+  color: #dbe5e3;
 }
 
+.form-input :deep(.n-input__input-el) { color: #dbe5e3; caret-color: #f0d68e; }
+.form-input :deep(.n-input__border) { border-color: #506b7b; }
+.form-input :deep(.n-input__placeholder) { color: #bdccd2; }
+
 .form-input:hover {
-  background: rgba(255, 255, 255, .58);
+  background: #10283a;
 }
 
 .form-input:hover :deep(.n-input__state-border) {
-  border-color: rgba(72, 100, 117, .38);
+  border-color: #95a9b0;
 }
 
 .form-input:focus-within {
-  background: rgba(255, 255, 255, .64);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, .52), 0 0 0 4px rgba(72, 100, 117, .18);
+  background: #10283a;
+  box-shadow: 0 0 0 2px #d8b36d55;
 }
 
 .form-input:focus-within :deep(.n-input__state-border) {
-  border-color: rgba(72, 100, 117, .7);
+  border-color: #ddbc73;
 }
 
 .form-input :deep(input::placeholder) {
-  color: #394e61;
+  color: #bdccd2;
   opacity: 1;
 }
 
 .form-input :deep(input::selection) {
-  background: rgba(117, 147, 159, .42);
-  color: #203b55;
+  background: #547789;
+  color: #fff3cf;
 }
 
 .form-input:disabled {
@@ -203,13 +171,9 @@ async function handleLogin() {
   cursor: not-allowed;
 }
 
-.form-input::placeholder {
-  color: var(--color-text-secondary);
-}
-
 .login-error {
   font-size: 13px;
-  color: var(--color-danger);
+  color: #ffc1a6;
   margin: 0;
   text-align: center;
 }
@@ -219,35 +183,38 @@ async function handleLogin() {
   min-height: 38px;
   margin-top: 3px;
   position: relative;
-  background: rgba(255, 255, 255, .54);
-  color: #2a4660;
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  border-radius: 2px;
+  background: repeating-linear-gradient(0deg, #24446a 0 2px, #25476e 2px 3px);
+  color: #f1d992;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-shadow: 1px 1px #142435;
+  box-shadow: inset 1px 1px #5482a7, inset -1px -1px #11263e, 0 1px #6e5023;
   transition: background-color .2s ease, color .2s ease;
 }
 
 .login-btn:hover {
-  background: rgba(255, 255, 255, .72);
-  color: #203b55;
+  background: #305580;
+  color: #ffe8ab;
 }
 
 .login-btn:active {
-  background: rgba(255, 255, 255, .8);
-  color: #203b55;
+  background: #1b3554;
+  color: #ffe8ab;
 }
 
 .login-btn:focus-visible {
-  outline: 2px solid rgba(72, 100, 117, .7);
+  outline: 2px solid #f2ca7b;
   outline-offset: 2px;
 }
 
 .login-btn :deep(.n-base-wave) {
-  --n-ripple-color: rgba(72, 100, 117, .28);
+  --n-ripple-color: #dfba6b66;
 }
 
 .login-btn :deep(.n-button__border),
 .login-btn :deep(.n-button__state-border) {
-  border-color: rgba(255, 255, 255, .52);
+  border-color: #dfba6b;
 }
 
 .login-btn:disabled {
@@ -259,8 +226,9 @@ async function handleLogin() {
   display: inline-block;
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
+  margin-right: 6px;
+  border: 2px solid #f1d99255;
+  border-top-color: #f1d992;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -275,9 +243,6 @@ async function handleLogin() {
     justify-content: center;
     padding: 32px 24px max(32px, env(safe-area-inset-bottom));
   }
-  .login-tint {
-    background: linear-gradient(180deg, transparent 28%, rgba(241, 247, 251, .16) 50%, rgba(241, 247, 251, .76) 100%);
-  }
 }
 
 @media (max-width: 599px) {
@@ -289,7 +254,4 @@ async function handleLogin() {
   .login-page { align-items: flex-start; overflow-y: auto; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .login-video { display: none; }
-}
 </style>
