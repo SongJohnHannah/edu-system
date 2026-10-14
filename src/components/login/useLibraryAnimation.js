@@ -10,7 +10,7 @@ export function useLibraryAnimation(canvasRef, backdropUrl, theme) {
   let width = 0, height = 0, destroyed = false
 
   function draw() {
-    if (!scene || !width || !height) return
+    if (!ready.value || !scene || !width || !height) return
     const next = scene.draw(width, height, elapsed / 1000)
     const previousBox = hotspot.value
     if (!next || !previousBox || Object.keys(next).some(key => next[key] !== previousBox[key])) hotspot.value = next
@@ -68,11 +68,9 @@ export function useLibraryAnimation(canvasRef, backdropUrl, theme) {
     elapsed = 0
     scene?.dispose()
     scene = createLibraryScene(context, nextImage, theme.value)
-    syncAnimation()
     nextImage.onload = () => {
       if (destroyed || image !== nextImage) return
       ready.value = true
-      draw()
       syncAnimation()
     }
     nextImage.onerror = () => {
@@ -82,6 +80,7 @@ export function useLibraryAnimation(canvasRef, backdropUrl, theme) {
     }
     // Only the selected scene is requested; the other background stays unloaded.
     nextImage.src = backdropUrl.value
+    syncAnimation()
   }
 
   watch([backdropUrl, theme], loadBackdrop)

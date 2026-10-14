@@ -56,7 +56,7 @@ export function createLibraryActors(context) {
     const key=`${phase}-${blink}-${cheer}`;
     if(!spriteCache.has(key)) {
       const sprite=document.createElement('canvas'); sprite.width=116; sprite.height=134;
-      const original=ctx; ctx=sprite.getContext('2d');
+      const original=ctx; ctx=sprite.getContext('2d', { willReadFrequently: true });
       bearPaint(12,130,1,phase/7,1,cheer,blink);
       const pixels=ctx.getImageData(0,0,116,134);
       for(let py=0;py<134;py++) for(let px=0;px<116;px++) {
@@ -76,7 +76,7 @@ export function createLibraryActors(context) {
   function glyph(letter,color,outline) {
     const key=letter+color;
     if(glyphCache.has(key)) return glyphCache.get(key);
-    const mask=document.createElement('canvas'), sample=mask.getContext('2d');
+    const mask=document.createElement('canvas'), sample=mask.getContext('2d', { willReadFrequently: true });
     sample.font='900 70px Arial'; mask.width=Math.ceil(sample.measureText(letter).width)+8; mask.height=82;
     sample.font='900 70px Arial'; sample.fillStyle='#ffffff'; sample.fillText(letter,4,70);
     const data=sample.getImageData(0,0,mask.width,mask.height), output=sample.createImageData(mask.width,mask.height);
