@@ -25,6 +25,8 @@ async function bootstrap() {
   const authStore = useAuthStore()
   authStore.loadFromStorage()
 
+  // Resolve the login redirect before mounting navigation and its images.
+  await router.isReady()
   app.mount('#app')
 }
 
