@@ -23,7 +23,9 @@ try {
     })
     const page = await context.newPage()
     const errors = []
+    const mediaRequests = []
     page.on('pageerror', error => errors.push(error.message))
+    page.on('request', request => { if (/\.mp4(?:\?|$)/.test(request.url())) mediaRequests.push(request.url()) })
     await page.goto('http://127.0.0.1:4174/')
     await page.waitForURL('http://127.0.0.1:4174/login')
     if (await page.evaluate(() => localStorage.getItem('access_token'))) throw new Error(`${width}px: 未登录仍有访问凭证`)
@@ -31,14 +33,16 @@ try {
     const card = page.locator('.login-card')
     await card.waitFor()
     if (await card.locator('img, svg, h1, h2, label').count()) throw new Error(`${width}px: 登录框内仍有 Logo、标题或外部标签`)
-    if (await page.locator('.login-video').evaluate(video => getComputedStyle(video).objectFit) !== 'cover') throw new Error(`${width}px: 视频未按比例铺满`)
+    await page.locator('.library-canvas.is-ready').waitFor()
+    if (await page.locator('video').count() || mediaRequests.length) throw new Error(`${width}px: 像素登录页仍加载视频`)
+    if (!await page.getByRole('button', { name: '暂停动画' }).isVisible()) throw new Error(`${width}px: 动画暂停控制不可用`)
     const box = await card.boundingBox()
-    if (process.env.LOGIN_SCREENSHOTS === '1') await page.screenshot({ path: `.qa/login-current-${width}.png`, animations: 'disabled' })
+    if (process.env.LOGIN_SCREENSHOTS === '1') await page.screenshot({ path: `.qa/login-library-${width}.png`, animations: 'disabled' })
     if (!box || box.width > 290 || Math.abs(box.x + box.width / 2 - width / 2) > 2 || Math.abs(box.y + box.height / 2 - 450) > 4) {
       throw new Error(`${width}px: 登录框宽度或居中位置错误：${JSON.stringify(box)}`)
     }
     const placeholderColor = await card.getByLabel('用户名').evaluate(input => getComputedStyle(input, '::placeholder').color)
-    if (placeholderColor !== 'rgb(57, 78, 97)') throw new Error(`${width}px: 输入框提示字颜色偏淡：${placeholderColor}`)
+    if (placeholderColor !== 'rgb(189, 204, 210)') throw new Error(`${width}px: 深色输入框提示字颜色不正确：${placeholderColor}`)
     await card.getByLabel('用户名').fill('测试账号')
     await card.getByLabel('密码').fill('wrong')
     await card.getByRole('button', { name: '登录', exact: true }).click()
@@ -64,14 +68,46 @@ try {
     await page.goto('http://127.0.0.1:4174/login')
     const card = page.locator('.login-card')
     await card.waitFor({ state: 'visible' })
-    if (process.env.LOGIN_SCREENSHOTS === '1') await page.screenshot({ path: '.qa/login-current-landscape.png', animations: 'disabled' })
+    if (process.env.LOGIN_SCREENSHOTS === '1') await page.screenshot({ path: '.qa/login-library-landscape.png', animations: 'disabled' })
     const box = await card.boundingBox()
     if (!box || Math.abs(box.x + box.width / 2 - 422) > 2 || Math.abs(box.y + box.height / 2 - 195) > 4) {
       throw new Error(`手机横屏登录框未居中：${JSON.stringify(box)}`)
     }
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)) throw new Error('手机横屏登录页横向溢出')
   } finally { await landscape.close() }
-  console.log('login redirect, failure, duplicate guard, success, logout and compact video layout passed: PC, iPad, phone')
+  const motion = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 })
+  try {
+    const page = await motion.newPage()
+    await page.clock.install()
+    await page.goto('http://127.0.0.1:4174/login')
+    const canvas = page.locator('.library-canvas.is-ready')
+    await canvas.waitFor()
+    const resolution = await canvas.evaluate(element => ({ pixels: element.width, displayed: element.clientWidth }))
+    if (resolution.pixels !== resolution.displayed * 2) throw new Error('高清屏画布分辨率不足')
+    const initial = await canvas.evaluate(element => element.toDataURL())
+    await page.clock.runFor(1500)
+    if (initial === await canvas.evaluate(element => element.toDataURL())) throw new Error('小熊动画未播放')
+    await page.getByRole('button', { name: '暂停动画' }).click()
+    const paused = await canvas.evaluate(element => element.toDataURL())
+    await page.clock.runFor(700)
+    if (paused !== await canvas.evaluate(element => element.toDataURL())) throw new Error('暂停后动画仍在变化')
+    await page.getByRole('button', { name: '播放动画' }).click()
+    await page.clock.runFor(1300)
+    if (paused === await canvas.evaluate(element => element.toDataURL())) throw new Error('小熊动画未恢复播放')
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.getByRole('button', { name: '播放动画' }).waitFor()
+    const reduced = await canvas.evaluate(element => element.toDataURL())
+    await page.clock.runFor(700)
+    if (reduced !== await canvas.evaluate(element => element.toDataURL())) throw new Error('减少动态效果设置未停止动画')
+  } finally { await motion.close() }
+  const reduced = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: 'reduce' })
+  try {
+    const page = await reduced.newPage()
+    await page.goto('http://127.0.0.1:4174/login')
+    await page.locator('.library-canvas.is-ready').waitFor()
+    await page.getByRole('button', { name: '播放动画' }).waitFor()
+  } finally { await reduced.close() }
+  console.log('login workflow, centered pixel library, animation controls and reduced motion passed: PC, iPad, phone')
 } finally {
   await browser.close()
 }

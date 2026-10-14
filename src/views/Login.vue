@@ -1,11 +1,6 @@
 <template>
-  <div class="login-page">
-    <div class="login-media" aria-hidden="true">
-      <video ref="videoElement" class="login-video" autoplay muted loop playsinline preload="metadata" :poster="loginPoster">
-        <source :src="loginVideo" type="video/mp4" />
-      </video>
-    </div>
-    <div class="login-tint" aria-hidden="true"></div>
+  <div class="login-page" :class="{ 'is-day': sceneTheme === 'day' }">
+    <LibraryScene v-model:theme="sceneTheme" />
     <div class="login-card">
       <form class="login-form" aria-label="登录" @submit.prevent="handleLogin">
         <div class="form-group">
@@ -33,7 +28,7 @@
           />
         </div>
 
-        <p class="login-error" v-if="errorMsg">{{ errorMsg }}</p>
+        <p class="login-error" role="alert" v-if="errorMsg">{{ errorMsg }}</p>
 
         <OfficeButton type="submit" class="btn login-btn" :disabled="loading">
           <span v-if="loading" class="login-spinner"></span>
@@ -45,35 +40,20 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth.js'
-import loginVideo from '../assets/login-scene.mp4'
-import loginPoster from '../assets/login-scene-poster.webp'
+import LibraryScene from '../components/login/LibraryScene.vue'
+import { readSceneTheme } from '../components/login/libraryPreferences.js'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const sceneTheme = ref(readSceneTheme())
 
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const errorMsg = ref('')
-const videoElement = ref(null)
-let motionPreference
-
-function syncMotionPreference() {
-  if (motionPreference.matches) videoElement.value?.pause()
-  else videoElement.value?.play().catch(() => {})
-}
-
-onMounted(() => {
-  motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
-  motionPreference.addEventListener('change', syncMotionPreference)
-  syncMotionPreference()
-})
-
-onBeforeUnmount(() => motionPreference?.removeEventListener('change', syncMotionPreference))
-
 async function handleLogin() {
   if (loading.value) return
   errorMsg.value = ''
@@ -92,6 +72,31 @@ async function handleLogin() {
 
 <style scoped>
 .login-page {
+  --login-panel-start: #183747;
+  --login-panel-end: #102734;
+  --login-border: #c4a064;
+  --login-outline: #243948;
+  --login-rim: #806842;
+  --login-shadow: #090f1666;
+  --login-highlight: #688591;
+  --login-inset: #071c29;
+  --login-control: #0b2433;
+  --login-control-hover: #102f43;
+  --login-control-border: #68838f;
+  --login-control-border-hover: #96adb6;
+  --login-text: #e1e9e6;
+  --login-placeholder: #bdccd2;
+  --login-focus: #ddbc73;
+  --login-ring: #d8b36d55;
+  --login-selection: #547789;
+  --login-selection-text: #fff3cf;
+  --login-button: #285579;
+  --login-button-stripe: #2a587c;
+  --login-button-hover: #32668c;
+  --login-button-active: #214967;
+  --login-button-text: #f1deb2;
+  --login-error: #ffc1a6;
+  --login-spinner-muted: #f1deb255;
   position: relative;
   isolation: isolate;
   min-height: 100vh;
@@ -100,45 +105,46 @@ async function handleLogin() {
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  background: #dceaf4;
+  background: #171c23;
   padding: 32px clamp(32px, 5.5vw, 96px);
 }
 
-.login-media,
-.login-tint {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.login-media {
-  z-index: -2;
-  background: #dceaf4 url('../assets/login-scene-poster.webp') center / cover no-repeat;
-}
-
-.login-video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  object-position: center;
-}
-
-.login-tint {
-  z-index: -1;
-  background:
-    linear-gradient(90deg, transparent 42%, rgba(241, 247, 251, .22) 66%, rgba(241, 247, 251, .62) 100%),
-    linear-gradient(180deg, rgba(243, 248, 251, .04), rgba(236, 244, 249, .16));
+.login-page.is-day {
+  --login-panel-start: #f5fbff;
+  --login-panel-end: #dceeff;
+  --login-border: #ffffff;
+  --login-outline: #cae7fc;
+  --login-rim: #75afd7;
+  --login-shadow: #2c6c9533;
+  --login-highlight: #ffffff;
+  --login-inset: #a9cee8;
+  --login-control: #f9fcff;
+  --login-control-hover: #eef7ff;
+  --login-control-border: #8db4d2;
+  --login-control-border-hover: #5e96bf;
+  --login-text: #244f71;
+  --login-placeholder: #52718a;
+  --login-focus: #337db5;
+  --login-ring: #4096cc33;
+  --login-selection: #bedef5;
+  --login-selection-text: #244f71;
+  --login-button: #3377ab;
+  --login-button-stripe: #357aad;
+  --login-button-hover: #2d6b99;
+  --login-button-active: #2b6390;
+  --login-button-text: #ffffff;
+  --login-error: #995449;
+  --login-spinner-muted: #ffffff66;
 }
 
 .login-card {
   position: relative;
-  background: rgba(255, 255, 255, .27);
-  border: 1px solid rgba(255, 255, 255, .5);
-  backdrop-filter: blur(8px) saturate(108%);
-  -webkit-backdrop-filter: blur(8px) saturate(108%);
-  border-radius: 16px;
-  box-shadow: 0 16px 46px rgba(44, 75, 111, .14);
+  z-index: 1;
+  background: linear-gradient(135deg, var(--login-panel-start), var(--login-panel-end));
+  border: 1px solid var(--login-border);
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--login-outline), 0 0 0 3px var(--login-rim), 3px 4px var(--login-shadow),
+    inset 1px 1px var(--login-highlight), inset -1px -1px var(--login-inset);
   padding: 18px 19px 20px;
   width: 100%;
   max-width: 276px;
@@ -161,41 +167,46 @@ async function handleLogin() {
   padding: 0;
   font-size: 13px;
   border: none;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, .48);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  border-radius: 6px;
+  background: var(--login-control);
+  box-shadow: inset 1px 1px var(--login-inset);
   transition: var(--transition);
   outline: none;
   font-family: inherit;
-  color: var(--color-text);
+  color: var(--login-text);
 }
 
+.form-input :deep(.n-input__input-el) { color: var(--login-text); caret-color: var(--login-focus); }
+.form-input :deep(.n-input__border) { border-color: var(--login-control-border); }
+.form-input :deep(.n-input__border),
+.form-input :deep(.n-input__state-border) { border-radius: 6px; }
+.form-input :deep(.n-input__placeholder) { color: var(--login-placeholder); }
+
 .form-input:hover {
-  background: rgba(255, 255, 255, .58);
+  background: var(--login-control-hover);
 }
 
 .form-input:hover :deep(.n-input__state-border) {
-  border-color: rgba(72, 100, 117, .38);
+  border-color: var(--login-control-border-hover);
 }
 
 .form-input:focus-within {
-  background: rgba(255, 255, 255, .64);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, .52), 0 0 0 4px rgba(72, 100, 117, .18);
+  background: var(--login-control-hover);
+  box-shadow: 0 0 0 2px var(--login-ring);
 }
 
 .form-input:focus-within :deep(.n-input__state-border) {
-  border-color: rgba(72, 100, 117, .7);
+  border-color: var(--login-focus);
 }
 
 .form-input :deep(input::placeholder) {
-  color: #394e61;
+  color: var(--login-placeholder);
   opacity: 1;
 }
 
 .form-input :deep(input::selection) {
-  background: rgba(117, 147, 159, .42);
-  color: #203b55;
+  background: var(--login-selection);
+  color: var(--login-selection-text);
 }
 
 .form-input:disabled {
@@ -203,13 +214,9 @@ async function handleLogin() {
   cursor: not-allowed;
 }
 
-.form-input::placeholder {
-  color: var(--color-text-secondary);
-}
-
 .login-error {
   font-size: 13px;
-  color: var(--color-danger);
+  color: var(--login-error);
   margin: 0;
   text-align: center;
 }
@@ -219,35 +226,39 @@ async function handleLogin() {
   min-height: 38px;
   margin-top: 3px;
   position: relative;
-  background: rgba(255, 255, 255, .54);
-  color: #2a4660;
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
+  border-radius: 6px;
+  background: repeating-linear-gradient(0deg, var(--login-button) 0 2px, var(--login-button-stripe) 2px 3px);
+  color: var(--login-button-text);
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-shadow: 0 1px var(--login-shadow);
+  box-shadow: inset 1px 1px var(--login-highlight), inset -1px -1px var(--login-inset), 0 1px var(--login-rim);
   transition: background-color .2s ease, color .2s ease;
 }
 
 .login-btn:hover {
-  background: rgba(255, 255, 255, .72);
-  color: #203b55;
+  background: var(--login-button-hover);
+  color: var(--login-button-text);
 }
 
 .login-btn:active {
-  background: rgba(255, 255, 255, .8);
-  color: #203b55;
+  background: var(--login-button-active);
+  color: var(--login-button-text);
 }
 
 .login-btn:focus-visible {
-  outline: 2px solid rgba(72, 100, 117, .7);
+  outline: 2px solid var(--login-focus);
   outline-offset: 2px;
 }
 
 .login-btn :deep(.n-base-wave) {
-  --n-ripple-color: rgba(72, 100, 117, .28);
+  --n-ripple-color: var(--login-ring);
 }
 
 .login-btn :deep(.n-button__border),
 .login-btn :deep(.n-button__state-border) {
-  border-color: rgba(255, 255, 255, .52);
+  border-color: var(--login-control-border);
+  border-radius: 6px;
 }
 
 .login-btn:disabled {
@@ -259,8 +270,9 @@ async function handleLogin() {
   display: inline-block;
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
+  margin-right: 6px;
+  border: 2px solid var(--login-spinner-muted);
+  border-top-color: var(--login-button-text);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
 }
@@ -275,9 +287,6 @@ async function handleLogin() {
     justify-content: center;
     padding: 32px 24px max(32px, env(safe-area-inset-bottom));
   }
-  .login-tint {
-    background: linear-gradient(180deg, transparent 28%, rgba(241, 247, 251, .16) 50%, rgba(241, 247, 251, .76) 100%);
-  }
 }
 
 @media (max-width: 599px) {
@@ -289,7 +298,4 @@ async function handleLogin() {
   .login-page { align-items: flex-start; overflow-y: auto; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .login-video { display: none; }
-}
 </style>

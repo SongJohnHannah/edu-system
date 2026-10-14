@@ -1,5 +1,5 @@
 <template>
-  <section class="weekly-page">
+  <section class="weekly-page" :class="{ 'desktop-layout': isBoardLayout, 'show-overlap-outline': !isBoardLayout || SHOW_BOARD_OVERLAP_OUTLINE }" :style="scheduleVariables">
     <header class="weekly-head">
       <div><h1>周课程表</h1><p>{{ weekLabel }} · 单击课程查看学生与试听预约</p></div>
       <div class="head-actions">
@@ -12,16 +12,20 @@
 
     <div class="filter-strip">
       <span>显示：</span>
-      <NButton size="small" :type="teacherFilter === 'all' ? 'primary' : 'default'" :secondary="teacherFilter !== 'all'" @click="teacherFilter = 'all'">全部教师</NButton>
-      <NButton v-if="auth.teacherId" size="small" :type="teacherFilter === 'mine' ? 'primary' : 'default'" :secondary="teacherFilter !== 'mine'" @click="teacherFilter = 'mine'">我的课程</NButton>
-      <span class="hint desktop-hint">点击课程查看详情；拖动手柄或触屏长按可调课。红色虚线内的重叠课程请点击选择，不可拖动。</span>
+      <NButton size="small" :type="teacherFilter === 'all' ? 'primary' : 'default'" :secondary="teacherFilter !== 'all'" @click="setTeacherFilter('all')">全部教师</NButton>
+      <NButton v-if="auth.teacherId" size="small" :type="teacherFilter === 'mine' ? 'primary' : 'default'" :secondary="teacherFilter !== 'mine'" @click="setTeacherFilter('mine')">我的课程</NButton>
+      <span class="hint teacher-filter-hint">点击教师名称，只展示某个或某几个教师的排课内容。</span>
+      <span v-if="!isBoardLayout" class="hint desktop-hint">点击课程查看详情；拖动手柄或触屏长按可调课。红色虚线内的重叠课程请点击选择，不可拖动。</span>
       <span class="hint phone-hint">点击课程查看详情；调整时间请在详情中操作。</span>
     </div>
+    <p v-if="isBoardLayout" class="board-hint desktop-hint">点击卡片查看详情；左右拖动日历浏览，拖动手柄或触屏长按可调整课程与独立试听，重叠课程也支持拖动。</p>
     <p v-if="!referenceLoading && !referenceError && !canCreateCourse" class="create-prerequisite">{{ createPrerequisite }}</p>
     <div v-if="teacherLegend.length" class="teacher-legend">
-      <span v-for="teacher in teacherLegend" :key="teacher.id" class="legend-item">
-        <i :style="paletteStyle(teacher.id)"></i>{{ teacher.name }}
-      </span>
+      <template v-for="teacher in teacherLegend" :key="teacher.id">
+        <button type="button" class="legend-item legend-filter" :class="{ selected: teacherIsSelected(teacher.id), muted: !teacherIsSelected(teacher.id) }" :aria-pressed="teacherIsSelected(teacher.id)" :style="paletteStyle(teacher.id)" @click="toggleTeacher(teacher.id)">
+          <i :style="paletteStyle(teacher.id)"></i>{{ teacher.name }}
+        </button>
+      </template>
     </div>
 
     <div v-if="loading || referenceLoading" class="loading">正在加载两周课程…</div>
@@ -54,31 +58,38 @@
         </section>
       </div>
       <div class="combined-board" aria-label="连续两周课程表">
-        <div class="combined-week-head"><span v-for="(week, index) in weekGroups" :key="week.start"><strong class="combined-week-label">第 {{ index + 1 }} 周 · {{ week.start }} — {{ week.end }}</strong><NButton size="tiny" :disabled="week.end < today || !canCreateCourse" @click="openCreate(week.start)">在本周创建课程</NButton></span></div>
-        <div class="board-scroll">
-          <div class="week-board combined-grid">
+        <div v-if="!isBoardLayout" class="combined-week-head"><span v-for="(week, index) in weekGroups" :key="week.start"><strong class="combined-week-label">第 {{ index + 1 }} 周 · {{ week.start }} — {{ week.end }}</strong><NButton size="tiny" :disabled="week.end < today || !canCreateCourse" @click="openCreate(week.start)">在本周创建课程</NButton></span></div>
+        <div class="board-scroll" :class="{ panning }" :tabindex="isBoardLayout ? 0 : undefined" :aria-label="isBoardLayout ? '两周课程表，可左右拖动或使用方向键浏览' : undefined" @pointerdown="startBoardPan" @click.capture="consumePanClick">
+          <div class="board-content" :style="boardContentStyle">
+          <div v-if="isBoardLayout" class="combined-week-head" :style="weekHeadStyle"><span v-for="(week, index) in weekGroups" :key="week.start"><strong class="combined-week-label">第 {{ index + 1 }} 周 · {{ week.start }} — {{ week.end }}</strong><NButton size="tiny" :disabled="week.end < today || !canCreateCourse" @click="openCreate(week.start)">在本周创建课程</NButton></span></div>
+          <div class="week-board combined-grid" :style="boardGridStyle">
             <div class="corner">时间</div>
             <div v-for="(d, dayIndex) in weekDays" :key="`${d.date}-head`" class="day-head" :class="{ active: d.date === today, 'next-week': dayIndex === 7 }" :data-date="d.date">
               <div class="day-name">{{ d.label }}</div><span class="day-date">{{ d.month }}/{{ d.day }}</span>
               <button v-if="d.date >= today && canMoveWholeDay(d.date)" class="day-drag-handle" type="button" :aria-label="`拖动或点击整体调整 ${d.date} 的课程`" title="拖动整天课程到目标日期，或点击选择日期" @pointerdown.stop="startDayPointer($event, d.date)" @click.stop="clickDayMove(d.date)">整天</button>
             </div>
-            <div class="time-ruler"><div v-for="(time, index) in rulerTimes" :key="time" class="time-cell" :style="{ top: `${index * SLOT_PX}px` }">{{ index % 2 === 0 ? time : '' }}</div></div>
+            <div class="time-ruler"><div v-for="(time, index) in rulerTimes" :key="time" class="time-cell" :style="{ top: `${slotOffsets[index]}px` }">{{ index % 2 === 0 ? time : '' }}</div></div>
             <div class="swimlane swimlane-morning"><span>上午<br />07:30 – 12:00</span></div>
             <div class="swimlane swimlane-afternoon"><span>下午<br />12:00 – 18:00</span></div>
             <div class="swimlane swimlane-evening"><span>晚上<br />18:00 – 22:30</span></div>
-            <div v-for="(d, dayIndex) in weekDays" :key="d.date" class="day-lane" :class="{ 'next-week': dayIndex === 7 }" :data-date="d.date" :style="{ gridColumn: dayIndex + 2 }">
+            <div v-for="(d, dayIndex) in weekDays" :key="d.date" class="day-lane" :class="{ 'next-week': dayIndex === 7 }" :data-date="d.date" :style="{ gridColumn: dayIndex + 2, backgroundImage: laneBackground }">
               <TransitionGroup name="bar">
-                <div v-for="(item, itemIndex) in (itemsByDate[d.date] || []).filter(item => !item.hasOverlap)" :key="item.id" class="schedule-item course-bar"
-                  :class="{ trial: item.type === 'trial', readonly: !canEdit(item), draggable: canDrag(item), compact: minutes(item.endTime) - minutes(item.startTime) <= 30, dragging: drag.item?.id === item.id && drag.active, 'out-of-bounds': item.outOfBounds }"
+                <div v-for="(item, itemIndex) in (itemsByDate[d.date] || []).filter(item => isBoardLayout || !item.hasOverlap)" :key="item.id" class="schedule-item course-bar"
+                  :class="{ trial: item.type === 'trial', readonly: !canMoveItem(item), draggable: canDrag(item), parallel: isBoardLayout && item.laneCount > 1, 'has-overlap': item.hasOverlap, 'has-warning': item.outOfBounds || item.hasConflict, compact: minutes(item.endTime) - minutes(item.startTime) <= 30, dragging: drag.item?.id === item.id && drag.active, 'out-of-bounds': item.outOfBounds }"
                   :title="`${item.name} · ${item.startTime}—${item.endTime} · ${item.teacherName}${item.substitution ? '（临时代课）' : ''}`"
                   :aria-label="`${item.date} ${item.startTime} 至 ${item.endTime}，${item.name}，${item.teacherName}，查看详情`" role="button" tabindex="0"
-                  :style="{ ...itemStyle(item), ...paletteStyle(item.teacherId), '--idx': itemIndex }" @pointerdown="startPointer($event, item)" @click="openItem(item)" @keydown.enter.prevent="openItem(item)" @keydown.space.prevent="openItem(item)" @dragstart.prevent>
-                  <div class="bar-top"><strong class="bar-name">{{ item.name }}</strong><span v-if="item.type === 'course' && item.trialCount" class="trial-count" :data-short="`试${item.trialCount}`">试听 {{ item.trialCount }} 人</span><span v-if="item.type === 'trial'" class="trial-count" data-short="试听">试听</span></div>
-                  <span class="bar-meta">{{ item.laneCount > 1 ? item.startTime : `${item.startTime}—${item.endTime}` }} <span v-if="item.outOfBounds || item.hasOverlap" title="查看详情处理警示">⚠</span></span>
-                  <div class="bar-bottom"><span class="bar-teacher">{{ item.teacherName }}{{ item.substitution ? ' · 代课' : '' }}</span><span class="bar-students">{{ item.type === 'course' ? `${item.studentIds.length} 人` : item.studentName }}</span></div>
-                  <span v-if="canDrag(item)" class="drag-handle" title="按住拖动调整课程时间" aria-hidden="true"><svg viewBox="0 0 12 16" width="12" height="16" fill="currentColor"><circle cx="3" cy="3" r="1.25"/><circle cx="9" cy="3" r="1.25"/><circle cx="3" cy="8" r="1.25"/><circle cx="9" cy="8" r="1.25"/><circle cx="3" cy="13" r="1.25"/><circle cx="9" cy="13" r="1.25"/></svg></span>
+                  :data-schedule-id="item.id"
+                  :ref="element => observeCard(item.id, element)"
+                  :style="{ ...itemStyle(item), ...paletteStyle(item.teacherId), '--idx': itemIndex }" @pointerdown="startPointer($event, item)" @click="openItem(item, isBoardLayout)" @keydown.enter.prevent="openItem(item, isBoardLayout)" @keydown.space.prevent="openItem(item, isBoardLayout)" @dragstart.prevent>
+                  <div class="bar-top"><strong class="bar-name">{{ item.name }}</strong><span v-if="item.outOfBounds || item.hasConflict" class="bar-warning" title="查看详情处理警示">⚠</span></div>
+                  <span class="bar-meta">{{ item.startTime }}—{{ item.endTime }}</span>
+                  <div class="bar-bottom"><span class="bar-teacher">{{ item.teacherName }}{{ item.substitution ? ' · 代课' : '' }}</span><span v-if="item.type === 'course'" class="bar-students">{{ item.studentIds.length }} 人</span></div>
+                  <span v-if="item.type === 'course' && item.trialCount" class="trial-count bar-booking" :title="courseBookingNames(item)">试听预约 {{ item.trialCount }} 人</span>
+                  <span v-if="item.type === 'trial'" class="trial-count bar-booking" :title="`预约学生：${item.studentName}`">预约 · {{ item.studentName }}</span>
+                  <span v-if="canDrag(item)" class="drag-handle" :title="item.type === 'trial' ? '按住拖动调整试听预约时间' : '按住拖动调整课程时间'" aria-hidden="true"><svg viewBox="0 0 12 16" width="12" height="16" fill="currentColor"><circle cx="3" cy="3" r="1.25"/><circle cx="9" cy="3" r="1.25"/><circle cx="3" cy="8" r="1.25"/><circle cx="9" cy="8" r="1.25"/><circle cx="3" cy="13" r="1.25"/><circle cx="9" cy="13" r="1.25"/></svg></span>
                 </div>
               </TransitionGroup>
+              <template v-if="!isBoardLayout">
               <button v-for="group in overlapGroups[d.date] || []" :key="group.id" type="button" class="overlap-region"
                 :style="itemStyle(group)" :aria-label="`${group.items.length} 节重叠课程，点击选择编辑`" @click="openItem(group.items[0])">
                 <span class="overlap-count">{{ group.items.length }} 节重叠 · 选择</span>
@@ -88,12 +99,21 @@
                   <span v-if="item.trialCount" class="trial-count">试听 {{ item.trialCount }} 人</span>
                 </span>
               </button>
+              </template>
               <template v-if="drag.active && drag.target?.date === d.date">
-                <div v-for="preview in dropPreviews" :key="preview.id" class="drop-preview" :style="itemStyle(preview)">
-                  <strong>{{ preview.name }}</strong><span>{{ preview.startTime }}—{{ preview.endTime }}</span>
+                <div v-for="preview in dropPreviews" :key="preview.id" class="drop-preview" :class="isBoardLayout ? ['course-bar', previewCardClasses(preview)] : []" :style="{ ...dropPreviewStyle(preview), ...paletteStyle(preview.teacherId) }" aria-hidden="true">
+                  <template v-if="isBoardLayout">
+                    <div class="bar-top"><strong class="bar-name">{{ preview.name }}</strong><span v-if="preview.outOfBounds || preview.hasConflict" class="bar-warning">⚠</span></div>
+                    <span class="bar-meta">{{ preview.startTime }}—{{ preview.endTime }}</span>
+                    <div class="bar-bottom"><span class="bar-teacher">{{ preview.teacherName }}{{ preview.substitution ? ' · 代课' : '' }}</span><span v-if="preview.type === 'course'" class="bar-students">{{ preview.studentIds.length }} 人</span></div>
+                    <span v-if="preview.type === 'course' && preview.trialCount" class="trial-count bar-booking">试听预约 {{ preview.trialCount }} 人</span>
+                    <span v-if="preview.type === 'trial'" class="trial-count bar-booking">预约 · {{ preview.studentName }}</span>
+                  </template>
+                  <template v-else><strong>{{ preview.name }}</strong><span>{{ preview.startTime }}—{{ preview.endTime }}</span></template>
                 </div>
               </template>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -143,7 +163,7 @@
             <NButton size="small" type="primary" :loading="savingRoster" :disabled="loadingCourseEdit || !!courseEditError" @click="saveCourseDetails">保存课程资料与名单</NButton>
           </div>
         </template>
-        <template v-else><div class="detail-section"><h3>试听学生</h3><p>{{ selectedItem.studentName }}</p><p>{{ selectedItem.note }}</p><NButton @click="router.push({ path: '/trial-bookings', query: { date: selectedItem.date } })">查看预约</NButton></div></template>
+        <template v-else><div class="detail-section"><h3>试听学生</h3><p>{{ selectedItem.studentName }}</p><p>{{ selectedItem.note }}</p><NButton @click="router.push({ path: '/trial-bookings', query: { date: selectedItem.date } })">查看预约</NButton><NButton v-if="isBoardLayout && canDrag(selectedItem)" type="primary" @click="editSelected">修改日期与时间</NButton></div></template>
         <template v-if="selectedItem.type === 'course' && canEdit(selectedItem) && !isPast(selectedItem)">
           <div class="detail-footer"><NButton @click="showSubstitution = true">{{ selectedItem.substitution ? '更换代课老师' : '安排代课' }}</NButton><NButton v-if="selectedItem.substitution" @click="showCancelSubstitution = true">取消代课</NButton><NButton @click="router.push({ path: '/trial-bookings', query: { date: selectedItem.date } })">安排试听</NButton><NButton type="primary" @click="editSelected">修改日期与时间</NButton></div>
           <div class="detail-section"><h3>已安排的调课</h3>
@@ -178,7 +198,7 @@
       <template #footer><div class="detail-footer"><NButton @click="showCreate = false">取消</NButton><NButton type="primary" :loading="savingCreate" @click="saveCreate">创建课程</NButton></div></template>
     </NModal>
 
-    <NModal v-model:show="showMove" preset="card" class="move-modal" title="确认调课">
+    <NModal v-model:show="showMove" preset="card" class="move-modal" :title="move.item?.type === 'trial' ? '调整试听预约' : '确认调课'">
       <div v-if="move.item" class="move-body">
         <p class="move-course">{{ move.item.name }} · {{ move.item.teacherName }}</p>
         <p>原定：{{ move.item.date }} {{ move.item.startTime }}—{{ move.item.endTime }}</p>
@@ -187,15 +207,18 @@
           <label>开始时间 <NSelect v-model:value="move.startTime" :options="timeOptions" @update:value="keepDuration" /></label>
           <label>结束时间（自动计算） <strong class="end-time-preview">{{ move.endTime }}</strong></label>
         </div>
+        <template v-if="move.item.type === 'course'">
         <label>请选择调整范围（必选）</label>
         <NRadioGroup v-model:value="move.scope">
           <NSpace vertical><NRadio value="once">仅这一次，之后仍按原星期上课</NRadio><NRadio value="future">从这次起改为每周目标星期</NRadio></NSpace>
         </NRadioGroup>
         <p class="move-note">{{ describeMove(move.item, move.targetDate, move.startTime, move.endTime, move.scope) }}</p>
         <p class="move-note">预约中的试听学生需要先取消或重新安排，才能调整该课次。</p>
+        </template>
+        <p v-else class="move-note">仅调整本次独立试听，保留预约学生、教师、时长和备注；保存时检查时间冲突。</p>
         <p v-if="isPast(move.item)" class="course-warning">这节课已开始，不能再调课。</p>
       </div>
-      <template #footer><div class="detail-footer"><NButton @click="showMove = false">返回</NButton><NButton type="primary" :disabled="!move.scope || (move.item && isPast(move.item))" :loading="savingMove" @click="saveMove">确认调课</NButton></div></template>
+      <template #footer><div class="detail-footer"><NButton @click="showMove = false">返回</NButton><NButton type="primary" :disabled="(move.item?.type === 'course' && !move.scope) || (move.item && isPast(move.item))" :loading="savingMove" @click="saveMove">{{ move.item?.type === 'trial' ? '保存预约时间' : '确认调课' }}</NButton></div></template>
     </NModal>
 
     <NModal v-model:show="showDayMove" preset="card" class="move-modal" title="整天调课确认">
@@ -212,17 +235,30 @@
       <template #footer><div class="detail-footer"><NButton @click="showDayMove = false">返回</NButton><NButton type="primary" :disabled="!dayMove.scope || hasPastDayCourse" :loading="savingDayMove" @click="saveDayMove">确认整体调课</NButton></div></template>
     </NModal>
 
-    <Teleport to="body"><div v-if="drag.active" class="drag-ghost" :style="{ left: `${Math.min(drag.x + 12, viewportWidth - 250)}px`, top: `${Math.max(8, drag.y - 64)}px`, ...paletteStyle(drag.item?.teacherId) }">{{ drag.label || drag.item?.name }}<br />{{ drag.preview || '选择时段' }}</div></Teleport>
+    <Teleport to="body">
+      <div v-if="drag.active" class="drag-layer" :class="{ 'desktop-layout': isBoardLayout }" aria-hidden="true">
+        <div v-if="isBoardLayout && drag.item" class="drag-ghost course-bar" :class="previewCardClasses(drag.item)" :style="{ ...dragGhostStyle, ...paletteStyle(drag.item.teacherId) }">
+          <div class="bar-top"><strong class="bar-name">{{ drag.item.name }}</strong><span v-if="drag.item.outOfBounds || drag.item.hasConflict" class="bar-warning">⚠</span></div>
+          <span class="bar-meta">{{ drag.target?.startTime || drag.item.startTime }}—{{ drag.target?.endTime || drag.item.endTime }}</span>
+          <div class="bar-bottom"><span class="bar-teacher">{{ drag.item.teacherName }}{{ drag.item.substitution ? ' · 代课' : '' }}</span><span v-if="drag.item.type === 'course'" class="bar-students">{{ drag.item.studentIds.length }} 人</span></div>
+          <span v-if="drag.item.type === 'course' && drag.item.trialCount" class="trial-count bar-booking">试听预约 {{ drag.item.trialCount }} 人</span>
+          <span v-if="drag.item.type === 'trial'" class="trial-count bar-booking">预约 · {{ drag.item.studentName }}</span>
+        </div>
+        <div v-else class="drag-ghost day-drag-ghost" :style="{ left: `${Math.min(drag.x + 12, viewportWidth - 250)}px`, top: `${Math.max(8, drag.y - 64)}px`, ...paletteStyle(drag.item?.teacherId) }">{{ drag.label || drag.item?.name }}<br />{{ drag.preview || '选择时段' }}</div>
+      </div>
+    </Teleport>
   </section>
 </template>
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
 import { teacherStyle } from '../utils/teacherColors.js'
-import { groupScheduleItems } from '../utils/scheduleLayout.js'
+import { groupScheduleItems, layoutScheduleItems, scheduleSlotOffsets } from '../utils/scheduleLayout.js'
+import { useScheduleBoardPan } from '../composables/useScheduleBoardPan.js'
+import { useScheduleCardSizing } from '../composables/useScheduleCardSizing.js'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { NButton, NModal, NRadio, NRadioGroup, NSelect, NSpace } from 'naive-ui'
-import { getCourseOccurrences, getTrialBookings, getStudents, getTeachers, addCourse, rescheduleCourse, rescheduleCourseDay, updateCourse, getScheduleAdjustments, removeScheduleAdjustment, cancelSubstitution } from '../utils/storage.js'
+import { getCourseOccurrences, getTrialBookings, getStudents, getTeachers, addCourse, rescheduleCourse, rescheduleCourseDay, updateCourse, updateTrialBooking, getScheduleAdjustments, removeScheduleAdjustment, cancelSubstitution } from '../utils/storage.js'
 import SubstitutionModal from '../components/SubstitutionModal.vue'
 import { useAuthStore } from '../stores/auth.js'
 import { useToast } from '../composables/useToast.js'
@@ -232,6 +268,11 @@ import { courseStudentLabel, prepareCourseRoster } from '../utils/courseRoster.j
 const SLOT_PX = 24
 const START_MIN = 450
 const END_MIN = 1350
+const BOARD_CARD_WIDTH = 70
+// Temporarily disabled on PC/iPad; keep the outline styles so this can be restored.
+const SHOW_BOARD_OVERLAP_OUTLINE = false
+const { isBoardLayout, panning, startBoardPan, consumePanClick } = useScheduleBoardPan()
+const { cardHeights, observeCard } = useScheduleCardSizing(isBoardLayout)
 
 const auth = useAuthStore()
 const toast = useToast()
@@ -246,6 +287,17 @@ const nowTick = ref(Date.now())
 const weekOffset = ref(0)
 const selectedDay = ref(today.value)
 const teacherFilter = ref('all')
+const selectedTeacherIds = ref([])
+function setTeacherFilter(mode) { teacherFilter.value = mode; selectedTeacherIds.value = [] }
+function toggleTeacher(id) {
+  const selected = teacherFilter.value === 'teachers' ? selectedTeacherIds.value : []
+  selectedTeacherIds.value = selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id]
+  teacherFilter.value = selectedTeacherIds.value.length ? 'teachers' : 'all'
+}
+function teacherIsSelected(id) {
+  if (teacherFilter.value === 'teachers') return selectedTeacherIds.value.includes(id)
+  return teacherFilter.value === 'all' || visibleItems.value.some(item => item.teacherId === id)
+}
 const occurrences = ref([])
 const bookings = ref([])
 const students = ref([])
@@ -287,6 +339,7 @@ const drag = ref({ item: null, active: false, x: 0, y: 0, preview: '', target: n
 let pointerOrigin = null
 let holdTimer = null
 let suppressClick = false
+let dragScrollFrame = 0
 
 function localDate(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 function atNoon(date) { return new Date(`${date}T12:00:00`) }
@@ -326,10 +379,21 @@ function studentName(id) { return courseStudentLabel(students.value.find(s => s.
 function paletteStyle(id) { return teacherStyle(id, teachers.value) }
 function isPast(item) { return new Date(`${item.date}T${item.startTime}:00`).getTime() <= Math.max(nowTick.value, Date.now()) }
 function canEdit(item) { return item.type === 'course' && (auth.isAdmin || !!auth.teacherId && auth.teacherId === (item.ownerTeacherId || item.teacherId)) }
+function canMoveItem(item) { return canEdit(item) || item.type === 'trial' && (auth.isAdmin || !!auth.teacherId && item.teacherId === auth.teacherId) }
 function hasScheduleOverlap(item) {
   return allItems.value.some(other => other.id !== item.id && other.date === item.date && other.startTime < item.endTime && item.startTime < other.endTime)
 }
-function canDrag(item) { return canEdit(item) && !isPast(item) && !hasScheduleOverlap(item) }
+function canDrag(item) { return canMoveItem(item) && !isPast(item) && (isBoardLayout.value || !hasScheduleOverlap(item)) }
+function itemDuration(item) { return item.type === 'trial' ? minutes(item.endTime) - minutes(item.startTime) : Number(item.hoursPerClass ?? 1) * 60 }
+function movedEndTime(item, startTime) {
+  if (item.type === 'course') return courseEndTime(startTime, item.hoursPerClass ?? 1)
+  const end = minutes(startTime) + itemDuration(item)
+  return end <= END_MIN ? formatMinutes(end) : ''
+}
+function courseBookingNames(item) {
+  return bookings.value.filter(booking => booking.status === 'active' && booking.courseId === item.courseId && booking.occurrenceDate === item.originalDate)
+    .map(booking => booking.studentName).join('、') || '点击查看试听预约详情'
+}
 function canMoveWholeDay(date) {
   const courses = (itemsByDate.value[date] || []).filter(canEdit)
   return courses.length > 0 && courses.every(canDrag)
@@ -367,16 +431,42 @@ const allItems = computed(() => {
   }))
   return [...courses, ...trials]
 })
-const visibleItems = computed(() => allItems.value.filter(item => teacherFilter.value === 'all' || item.teacherId === auth.teacherId || item.ownerTeacherId === auth.teacherId))
+const visibleItems = computed(() => allItems.value.filter(item => {
+  if (teacherFilter.value === 'teachers') return selectedTeacherIds.value.includes(item.teacherId)
+  return teacherFilter.value === 'all' || item.teacherId === auth.teacherId || item.ownerTeacherId === auth.teacherId
+}))
+const slotOffsets = computed(() => {
+  if (!isBoardLayout.value) return rulerTimes.map((_, index) => index * SLOT_PX)
+  const items = visibleItems.value.filter(item => displayedWeek(item.date)).map(item => ({
+    ...item, minimumHeight: (cardHeights.value[item.id] || BOARD_CARD_WIDTH) + 6
+  }))
+  return scheduleSlotOffsets(items, START_MIN, END_MIN, 32)
+})
+const scheduleVariables = computed(() => ({
+  '--schedule-slot-height': `${SLOT_PX}px`,
+  '--schedule-grid-height': `${slotOffsets.value.at(-1)}px`,
+  '--schedule-morning-height': `${slotOffsets.value[9]}px`,
+  '--schedule-afternoon-height': `${slotOffsets.value[21] - slotOffsets.value[9]}px`,
+  '--schedule-evening-height': `${slotOffsets.value.at(-1) - slotOffsets.value[21]}px`
+}))
+const laneBackground = computed(() => isBoardLayout.value ? `linear-gradient(to bottom, transparent 0px, ${slotOffsets.value.slice(1).flatMap(offset => [
+  `transparent ${offset - 1}px`, `rgba(38,56,77,.055) ${offset - 1}px`, `rgba(38,56,77,.055) ${offset}px`, `transparent ${offset}px`
+]).join(', ')})` : undefined)
+function timeOffset(minute) {
+  const position = Math.max(0, Math.min((END_MIN - START_MIN) / 30, (minute - START_MIN) / 30))
+  const index = Math.floor(position)
+  const offsets = slotOffsets.value
+  return offsets[index] + (position - index) * ((offsets[index + 1] ?? offsets[index]) - offsets[index])
+}
 const teacherLegend = computed(() => {
   const byId = new Map()
-  for (const item of visibleItems.value) if (item.teacherId) byId.set(item.teacherId, item.teacherName || teachers.value.find(t => t.id === item.teacherId)?.name || '教师')
+  for (const item of allItems.value) if (item.teacherId) byId.set(item.teacherId, item.teacherName || teachers.value.find(t => t.id === item.teacherId)?.name || '教师')
   return [...byId].map(([id, name]) => ({ id, name }))
 })
 const itemsByDate = computed(() => {
   const days = Object.fromEntries(weekDays.value.map(d => [d.date, []]))
   for (const item of visibleItems.value) if (days[item.date]) days[item.date].push({ ...item })
-  for (const items of Object.values(days)) {
+  for (const [date, items] of Object.entries(days)) {
     items.sort((a, b) => a.startTime.localeCompare(b.startTime))
     for (const item of items) item.outOfBounds = minutes(item.startTime) < START_MIN || minutes(item.endTime) > END_MIN
     for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
@@ -386,25 +476,60 @@ const itemsByDate = computed(() => {
       const sharedStudent = a.type === 'course' && b.type === 'course' && a.studentIds.some(id => b.studentIds.includes(id))
       if (a.teacherId === b.teacherId || sharedStudent) { a.hasConflict = true; b.hasConflict = true }
     }
+    if (isBoardLayout.value) days[date] = layoutScheduleItems(items)
   }
   return days
 })
 const overlapGroups = computed(() => Object.fromEntries(Object.entries(itemsByDate.value)
   .map(([date, items]) => [date, groupScheduleItems(items).filter(group => group.items.length > 1)])))
+const dayLaneCounts = computed(() => Object.fromEntries(weekDays.value.map(day =>
+  [day.date, Math.max(1, ...(itemsByDate.value[day.date] || []).map(item => item.laneCount || 1))])))
+const boardContentStyle = computed(() => isBoardLayout.value
+  ? { width: `${42 + Object.values(dayLaneCounts.value).reduce((sum, count) => sum + count * (BOARD_CARD_WIDTH + 6), 0)}px` } : {})
+const boardGridStyle = computed(() => isBoardLayout.value
+  ? { gridTemplateColumns: `42px ${weekDays.value.map(day => `${dayLaneCounts.value[day.date] * (BOARD_CARD_WIDTH + 6)}px`).join(' ')}` } : {})
+const weekHeadStyle = computed(() => ({ gridTemplateColumns: weekGroups.value
+  .map(week => `${week.days.reduce((sum, day) => sum + dayLaneCounts.value[day.date], 0)}fr`).join(' ') }))
 const dropPreviews = computed(() => {
   if (!drag.value.target) return []
   if (drag.value.item) return [{ ...drag.value.item, ...drag.value.target }]
   return (itemsByDate.value[pointerOrigin?.sourceDate] || []).filter(canEdit)
-    .map(item => ({ ...item, endTime: courseEndTime(item.startTime, item.hoursPerClass ?? 1) }))
+    .map(item => ({ ...item, ...drag.value.target, endTime: courseEndTime(item.startTime, item.hoursPerClass ?? 1) }))
 })
 const relatedTrials = computed(() => selectedItem.value?.type === 'course'
   ? bookings.value.filter(b => b.status === 'active' && b.courseId === selectedItem.value.courseId && b.occurrenceDate === selectedItem.value.originalDate)
   : [])
 function itemStyle(item) {
-  const top = ((Math.min(END_MIN - 30, Math.max(START_MIN, minutes(item.startTime))) - START_MIN) / 30) * SLOT_PX
-  const height = Math.max(SLOT_PX, ((Math.min(END_MIN, minutes(item.endTime)) - Math.max(START_MIN, minutes(item.startTime))) / 30) * SLOT_PX)
-  return { top: `${top}px`, height: `${height}px`, left: '3px', width: 'calc(100% - 6px)' }
+  const top = timeOffset(Math.min(END_MIN - 30, Math.max(START_MIN, minutes(item.startTime))))
+  const height = isBoardLayout.value && item.type ? 'auto' : `${Math.max(SLOT_PX, timeOffset(minutes(item.endTime)) - top)}px`
+  const columns = isBoardLayout.value ? dayLaneCounts.value[item.date] || 1 : 1
+  const lane = isBoardLayout.value ? item.laneIndex || 0 : 0
+  if (isBoardLayout.value && item.type) return { top: `${top}px`, height, minHeight: `${BOARD_CARD_WIDTH}px`, left: `${lane * (BOARD_CARD_WIDTH + 6) + 3}px`, width: `${BOARD_CARD_WIDTH}px` }
+  return { top: `${top}px`, height, left: `calc(${lane * 100 / columns}% + 3px)`, width: `calc(${100 / columns}% - 6px)` }
 }
+function previewCardClasses(item) {
+  return { trial: item.type === 'trial', draggable: true, parallel: item.laneCount > 1,
+    compact: minutes(item.endTime) - minutes(item.startTime) <= 30,
+    'has-warning': item.outOfBounds || item.hasConflict }
+}
+function cardSize(element) {
+  const style = getComputedStyle(element)
+  return { width: parseFloat(style.width), height: parseFloat(style.height) }
+}
+function dropPreviewStyle(item) {
+  const style = itemStyle(item)
+  const size = drag.value.sizes?.[item.id]
+  if (!isBoardLayout.value || !size) return style
+  return { ...style, width: `${size.width}px`, height: `${size.height}px`,
+    left: `${(item.laneIndex || 0) * (size.width + 6) + 3}px` }
+}
+const dragGhostStyle = computed(() => {
+  const size = drag.value.sizes?.[drag.value.item?.id]
+  if (!size) return {}
+  return { width: `${size.width}px`, height: `${size.height}px`,
+    left: `${Math.max(0, Math.min(drag.value.x - drag.value.grabX, viewportWidth.value - size.width))}px`,
+    top: `${Math.max(0, Math.min(drag.value.y - drag.value.grabY, window.innerHeight - size.height))}px` }
+})
 
 let weekRequest = 0
 let loadErrorToast = null
@@ -577,16 +702,16 @@ async function saveCreate() {
   finally { savingCreate.value = false }
 }
 function openMove(item, targetDate = item.date, startTime = item.startTime) {
-  if (!canEdit(item) || isPast(item)) return
+  if (!canMoveItem(item) || isPast(item)) return
   moveRequest++
-  move.value = { item, targetDate, startTime, endTime: courseEndTime(startTime, item.hoursPerClass ?? 1), scope: null }
+  move.value = { item, targetDate, startTime, endTime: movedEndTime(item, startTime), scope: null }
   showDetail.value = false
   showMove.value = true
 }
 function editSelected() { openMove(selectedItem.value) }
 function keepDuration(value) {
   if (!move.value.item) return
-  move.value.endTime = courseEndTime(value, move.value.item.hoursPerClass ?? 1)
+  move.value.endTime = movedEndTime(move.value.item, value)
 }
 function keepWithinWeek() {
   if (move.value.targetDate < moveMinDate.value || move.value.targetDate > moveMaxDate.value) {
@@ -598,9 +723,10 @@ async function saveMove() {
   const request = moveRequest
   if (savingMove.value) return
   if (m.item && isPast(m.item)) return toast.error('这节课已开始，不能再调课')
-  if (!['once', 'future'].includes(m.scope)) return toast.error('请先选择调课范围')
+  if (!m.item || !canMoveItem(m.item)) return
+  if (m.item.type === 'course' && !['once', 'future'].includes(m.scope)) return toast.error('请先选择调课范围')
   if (!m.item || !m.targetDate || !m.startTime || !m.endTime || m.startTime >= m.endTime ||
-      m.endTime !== courseEndTime(m.startTime, m.item.hoursPerClass ?? 1)) return toast.error('请检查开始时间和课时，结束时间不能晚于22:30')
+      m.endTime !== movedEndTime(m.item, m.startTime)) return toast.error('请检查开始时间和时长，结束时间不能晚于22:30')
   if (m.targetDate < moveMinDate.value || m.targetDate > moveMaxDate.value) return toast.error('仅可在当前显示的两周内调整')
   if (m.scope === 'future' && displayedWeek(m.targetDate)?.start !== displayedWeek(m.item.date)?.start &&
       displayedWeek(m.targetDate)?.start !== addDays(displayedWeek(m.item.date)?.start, 7)) return toast.error('跨周永久调课只可从下一周开始')
@@ -609,10 +735,14 @@ async function saveMove() {
   if (m.targetDate === m.item.date && m.startTime === m.item.startTime && m.endTime === m.item.endTime) return toast.error('调课日期和时间未改变')
   savingMove.value = true
   try {
-    await rescheduleCourse(m.item.courseId, { originalDate: m.item.originalDate, targetDate: m.targetDate,
+    if (m.item.type === 'trial') {
+      await updateTrialBooking(m.item.id.slice('trial:'.length), { studentId: m.item.studentId, teacherId: m.item.teacherId,
+        date: m.targetDate, startTime: m.startTime, endTime: m.endTime, note: m.item.note || '', courseId: null, occurrenceDate: null })
+    } else await rescheduleCourse(m.item.courseId, { originalDate: m.item.originalDate, targetDate: m.targetDate,
       startTime: m.startTime, endTime: m.endTime, scope: m.scope })
     if (request === moveRequest) showMove.value = false
-    toast.success('调课已保存'); await refreshWeekAfterWrite('调课已保存')
+    const action = m.item.type === 'trial' ? '预约时间已保存' : '调课已保存'
+    toast.success(action); await refreshWeekAfterWrite(action)
   } catch (error) { toast.error(error.message || '调课失败，课表未改变') }
   finally { savingMove.value = false }
 }
@@ -620,7 +750,7 @@ async function saveMove() {
 function openDayMove(sourceDate, targetDate = sourceDate) {
   const courses = (itemsByDate.value[sourceDate] || []).filter(item => canEdit(item))
   if (!courses.length) return toast.error('这一天没有可调整的正式课程')
-  if (courses.some(hasScheduleOverlap)) return toast.error('本日有重叠课程，请先逐节选择处理')
+  if (!isBoardLayout.value && courses.some(hasScheduleOverlap)) return toast.error('本日有重叠课程，请先逐节选择处理')
   if (courses.some(isPast)) return toast.error('本日有课程已开始，不能整天调课')
   dayMoveRequest++
   dayMove.value = { sourceDate, targetDate, scope: null }
@@ -631,7 +761,7 @@ async function saveDayMove() {
   const { sourceDate, targetDate, scope } = dayMove.value
   const request = dayMoveRequest
   if (hasPastDayCourse.value) return toast.error('本日有课程已开始，不能整天调课')
-  if (dayMoveCourses.value.some(hasScheduleOverlap)) return toast.error('本日有重叠课程，请先逐节选择处理')
+  if (!isBoardLayout.value && dayMoveCourses.value.some(hasScheduleOverlap)) return toast.error('本日有重叠课程，请先逐节选择处理')
   if (!['once', 'future'].includes(scope)) return toast.error('请先选择整批调课范围')
   if (!sourceDate || !targetDate || sourceDate === targetDate) return toast.error('请选择其他日期')
   if (targetDate < moveMinDate.value || targetDate > moveMaxDate.value) return toast.error('仅可在当前显示的两周内调整')
@@ -653,7 +783,11 @@ function startPointer(event, item) {
   if (event.pointerType === 'mouse' && !event.target.closest('.drag-handle')) return
   const touch = event.pointerType !== 'mouse'
   pointerOrigin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, item, touch, ready: !touch, cancelled: false }
-  drag.value = { item, active: false, x: event.clientX, y: event.clientY, preview: '', target: null }
+  const size = cardSize(event.currentTarget)
+  const box = event.currentTarget.getBoundingClientRect()
+  drag.value = { item, active: false, x: event.clientX, y: event.clientY, preview: '', target: null,
+    sizes: { [item.id]: size }, grabX: (event.clientX - box.left) / box.width * size.width,
+    grabY: (event.clientY - box.top) / box.height * size.height }
   if (touch) holdTimer = setTimeout(() => { if (pointerOrigin) pointerOrigin.ready = true }, 280)
   window.addEventListener('pointermove', onPointerMove, { passive: false })
   window.addEventListener('pointerup', endPointer)
@@ -666,7 +800,9 @@ function startDayPointer(event, sourceDate) {
   const touch = event.pointerType !== 'mouse'
   if (!touch) event.preventDefault()
   pointerOrigin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, sourceDate, ready: !touch, cancelled: false }
-  drag.value = { item: null, active: false, x: event.clientX, y: event.clientY, preview: '', target: null, label: `${courses.length} 节课程` }
+  const sizes = Object.fromEntries([...document.querySelectorAll(`.day-lane[data-date="${sourceDate}"] .schedule-item`)]
+    .map(element => [element.dataset.scheduleId, cardSize(element)]))
+  drag.value = { item: null, active: false, x: event.clientX, y: event.clientY, preview: '', target: null, sizes, label: `${courses.length} 节课程` }
   if (touch) holdTimer = setTimeout(() => { if (pointerOrigin) pointerOrigin.ready = true }, 280)
   window.addEventListener('pointermove', onPointerMove, { passive: false })
   window.addEventListener('pointerup', endPointer)
@@ -684,23 +820,48 @@ function onPointerMove(event) {
   viewportWidth.value = window.innerWidth
   drag.value.x = event.clientX; drag.value.y = event.clientY
   event.preventDefault()
+  updateDragTarget()
+  if (!dragScrollFrame) dragScrollFrame = requestAnimationFrame(scrollDraggedBoard)
+}
+function scrollDraggedBoard() {
+  dragScrollFrame = 0
+  if (!drag.value.active || !isBoardLayout.value) return
+  const board = document.querySelector('.weekly-page .board-scroll')
+  if (!board) return
+  const box = board.getBoundingClientRect()
+  const x = drag.value.x
+  const delta = x > box.right - 40 ? 12 : x < box.left + 70 ? -12 : 0
+  if (!delta) return
+  const previous = board.scrollLeft
+  board.scrollLeft += delta
+  if (board.scrollLeft === previous) return
+  updateDragTarget()
+  dragScrollFrame = requestAnimationFrame(scrollDraggedBoard)
+}
+function updateDragTarget() {
+  if (!pointerOrigin) return
+  const { x, y } = drag.value
   if (pointerOrigin.sourceDate) {
-    const target = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-date]')
+    const target = document.elementFromPoint(x, y)?.closest('[data-date]')
     const date = target?.dataset.date
     drag.value.target = date && date !== pointerOrigin.sourceDate && date >= today.value && displayedWeek(date) ? { date } : null
     drag.value.preview = drag.value.target ? `整体移至 ${date}，保持原时段` : '拖到另一日期'
     return
   }
-  const lane = document.elementFromPoint(event.clientX, event.clientY)?.closest('.day-lane')
+  const lane = document.elementFromPoint(x, y)?.closest('.day-lane')
   if (!lane) { drag.value.target = null; drag.value.preview = '移至两周内的日期'; return }
-  const slot = Math.floor((event.clientY - lane.getBoundingClientRect().top) / SLOT_PX)
+  const box = lane.getBoundingClientRect()
+  const offset = y - box.top
+  const slot = slotOffsets.value.findIndex((top, index, offsets) => offset >= top && offset < offsets[index + 1])
   const startMinute = START_MIN + slot * 30
-  const duration = Number(pointerOrigin.item.hoursPerClass ?? 1) * 60
+  const duration = itemDuration(pointerOrigin.item)
   const date = lane.dataset.date
   if (slot < 0 || startMinute + duration > END_MIN || new Date(`${date}T${formatMinutes(startMinute)}:00`) < new Date()) {
     drag.value.target = null; drag.value.preview = '此时段不可用'; return
   }
-  drag.value.target = { date, startTime: formatMinutes(startMinute), endTime: formatMinutes(startMinute + duration) }
+  const columns = isBoardLayout.value ? dayLaneCounts.value[date] || 1 : 1
+  const laneIndex = Math.max(0, Math.min(columns - 1, Math.floor((x - box.left) / box.width * columns)))
+  drag.value.target = { date, startTime: formatMinutes(startMinute), endTime: formatMinutes(startMinute + duration), laneIndex }
   drag.value.preview = `${date} ${drag.value.target.startTime}—${drag.value.target.endTime}`
 }
 function endPointer(event) {
@@ -717,6 +878,7 @@ function endPointer(event) {
   cleanupPointer()
 }
 function cleanupPointer() {
+  cancelAnimationFrame(dragScrollFrame); dragScrollFrame = 0
   clearTimeout(holdTimer); pointerOrigin = null
   drag.value = { item: null, active: false, x: 0, y: 0, preview: '', target: null }
   window.removeEventListener('pointermove', onPointerMove)
@@ -783,12 +945,18 @@ async function confirmRemoveAdjustment() {
 .teacher-legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0 0 12px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-secondary); font-size: 12px; }
 .legend-item i { display: inline-block; width: 15px; height: 15px; border-radius: 5px; background: var(--c-bg); border: 1px solid var(--c-border); }
+.legend-filter { padding: 5px 9px; border: 1px solid var(--color-border); border-radius: 7px; background: white; font-family: inherit; cursor: pointer; }
+.legend-filter.selected { color: var(--c-fg); border-color: var(--c-border); background: var(--c-bg); }
+.legend-filter.muted { opacity: .55; }
+.legend-filter:hover { opacity: 1; }
+.legend-filter:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.board-hint { margin: 0 0 10px; color: var(--color-text-secondary); font-size: 12px; }
 .combined-board { min-width: 0; }
 .combined-week-head { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 0 8px 42px; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .combined-week-head span { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 8px; }
 .combined-week-label { font-weight: inherit; }
 .combined-week-head span + span { border-left: 2px solid var(--color-primary); }
-.week-board.combined-grid { grid-template-columns: 42px repeat(14, minmax(0, 1fr)); grid-template-rows: 64px 720px; }
+.week-board.combined-grid { grid-template-columns: 42px repeat(14, minmax(0, 1fr)); grid-template-rows: 64px var(--schedule-grid-height); }
 .combined-grid .swimlane { grid-column: 2 / 16; }
 .combined-grid .next-week { border-left: 2px solid var(--color-primary); }
 .combined-grid .day-head { position: relative; }
@@ -796,7 +964,13 @@ async function confirmRemoveAdjustment() {
 .day-drag-handle:active { cursor: grabbing; }
 .day-drag-handle:hover { background: var(--color-selected); }
 .board-scroll { overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: white; box-shadow: var(--shadow-sm); }
-.week-board { display: grid; grid-template-columns: 42px repeat(7, minmax(0, 1fr)); grid-template-rows: 48px 720px; min-width: 0; }
+.desktop-layout .board-scroll { overflow-x: auto; cursor: grab; overscroll-behavior-x: contain; touch-action: pan-y; }
+.desktop-layout .board-scroll.panning, .desktop-layout .board-scroll.panning * { cursor: grabbing; user-select: none; }
+.desktop-layout .board-scroll:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.desktop-layout .combined-week-head { padding-top: 8px; }
+.desktop-layout .time-ruler, .desktop-layout .corner { position: sticky; left: 0; z-index: 7; background: #f8fafc; }
+.desktop-layout .course-bar.parallel:is(:hover, :active) { transform: none; }
+.week-board { display: grid; grid-template-columns: 42px repeat(7, minmax(0, 1fr)); grid-template-rows: 48px var(--schedule-grid-height); min-width: 0; }
 .corner, .day-head { grid-row: 1; border-bottom: 1px solid var(--color-border); text-align: center; background: rgba(38, 56, 77, .018); }
 .corner { grid-column: 1; display: flex; align-items: center; justify-content: center; color: var(--color-text-secondary); font-size: 12px; }
 .day-head { padding: 5px 1px; border-left: 1px solid var(--color-border); color: var(--color-text); }
@@ -804,14 +978,14 @@ async function confirmRemoveAdjustment() {
 .day-name { font-size: 11px; font-weight: 600; line-height: 1.25; }
 .day-date { display: inline-block; margin-top: 2px; padding: 1px 4px; border: 1px solid var(--color-border); border-radius: 10px; background: white; font-size: 10px; }
 .day-head.active .day-date { border-color: var(--color-primary); background: var(--color-primary); color: white; }
-.time-ruler { grid-column: 1; grid-row: 2; position: relative; z-index: 2; height: 720px; border-right: 1px solid var(--color-border); background: rgba(38,56,77,.018); }
+.time-ruler { grid-column: 1; grid-row: 2; position: relative; z-index: 2; height: var(--schedule-grid-height); border-right: 1px solid var(--color-border); background: rgba(38,56,77,.018); }
 .time-cell { position: absolute; right: 3px; font-size: 10px; color: var(--color-text-secondary); line-height: 1; transform: translateY(-5px); }
 .swimlane { grid-column: 2 / 9; grid-row: 2; align-self: start; position: relative; z-index: 0; pointer-events: none; border-bottom: 2px dashed rgba(38,56,77,.065); }
 .swimlane span { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); text-align: right; font-size: 10px; font-weight: 600; line-height: 1.3; letter-spacing: .5px; color: rgba(38,56,77,.26); }
-.swimlane-morning { height: 216px; background: linear-gradient(180deg, rgba(151,196,233,.10), rgba(151,196,233,.035)); }
-.swimlane-afternoon { height: 288px; margin-top: 216px; background: linear-gradient(180deg, rgba(245,192,169,.09), rgba(245,192,169,.025)); }
-.swimlane-evening { height: 216px; margin-top: 504px; background: linear-gradient(180deg, rgba(198,184,231,.10), rgba(198,184,231,.03)); border-bottom: 0; }
-.day-lane { grid-row: 2; height: 720px; position: relative; z-index: 1; border-left: 1px solid var(--color-border); background: repeating-linear-gradient(to bottom, transparent 0 23px, rgba(38,56,77,.055) 23px 24px); }
+.swimlane-morning { height: var(--schedule-morning-height); background: linear-gradient(180deg, rgba(151,196,233,.10), rgba(151,196,233,.035)); }
+.swimlane-afternoon { height: var(--schedule-afternoon-height); margin-top: var(--schedule-morning-height); background: linear-gradient(180deg, rgba(245,192,169,.09), rgba(245,192,169,.025)); }
+.swimlane-evening { height: var(--schedule-evening-height); margin-top: calc(var(--schedule-morning-height) + var(--schedule-afternoon-height)); background: linear-gradient(180deg, rgba(198,184,231,.10), rgba(198,184,231,.03)); border-bottom: 0; }
+.day-lane { grid-row: 2; height: var(--schedule-grid-height); position: relative; z-index: 1; border-left: 1px solid var(--color-border); background: repeating-linear-gradient(to bottom, transparent 0 calc(var(--schedule-slot-height) - 1px), rgba(38,56,77,.055) calc(var(--schedule-slot-height) - 1px) var(--schedule-slot-height)); }
 .course-bar { position: absolute; z-index: 2; display: flex; flex-direction: column; gap: 0; padding: 3px 3px; overflow: hidden; border: 1px solid var(--c-border); border-left: 3px solid var(--c-border); border-radius: 6px; background: var(--c-bg); color: var(--c-fg); box-shadow: 0 2px 8px rgba(38,56,77,.07); cursor: pointer; user-select: none; touch-action: manipulation; animation: barIn .5s cubic-bezier(.34,1.56,.64,1) both; animation-delay: calc(var(--idx) * 35ms + 100ms); transition: transform .3s cubic-bezier(.25,.1,.25,1), box-shadow .3s cubic-bezier(.25,.1,.25,1); }
 .course-bar.draggable { padding-right: 21px; }
 .course-bar.draggable { touch-action: none; }
@@ -825,17 +999,17 @@ async function confirmRemoveAdjustment() {
 .course-bar.trial { border-style: dashed; cursor: pointer; }
 .course-bar.out-of-bounds { background: repeating-linear-gradient(45deg, var(--c-bg), var(--c-bg) 8px, rgba(179,79,80,.13) 8px, rgba(179,79,80,.13) 16px); border-color: var(--color-danger); }
 .course-bar.out-of-bounds:not(.has-overlap) { border-style: solid; }
-.course-bar.has-overlap { outline: 2px dashed var(--color-danger); outline-offset: -2px; }
+.show-overlap-outline .course-bar.has-overlap { outline: 2px dashed var(--color-danger); outline-offset: -2px; }
 .course-bar.readonly { cursor: pointer; }
-.course-bar.dragging { animation: none; opacity: .45; }
+.course-bar.dragging { animation: none; transition: none; transform: none; opacity: .45; }
 .bar-top, .bar-bottom { display: flex; align-items: center; justify-content: space-between; gap: 3px; min-width: 0; }
-.bar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 700; line-height: 1.2; }
-.bar-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 600; line-height: 1.2; }
+.bar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 400; line-height: 1.2; }
+.bar-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 400; line-height: 1.2; }
 .course-bar.parallel .bar-meta { font-size: 10px; }
 .bar-bottom { margin-top: auto; font-size: 9px; line-height: 1.1; }
 .bar-teacher { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bar-students { flex: none; padding: 0 4px; border-radius: 7px; background: rgba(255,255,255,.58); white-space: nowrap; }
-.trial-count { flex: none; padding: 0 3px; border-radius: 4px; background: #fff4dd; color: #815618; font-size: 9px; font-weight: 700; line-height: 1.35; white-space: nowrap; }
+.trial-count { flex: none; padding: 0 3px; border-radius: 4px; background: #fff4dd; color: #815618; font-size: 9px; font-weight: 400; line-height: 1.35; white-space: nowrap; }
 .course-bar.compact { padding: 2px 4px; }
 .course-bar.draggable.compact { padding-right: 21px; }
 .course-bar.compact .bar-meta, .course-bar.compact .bar-bottom { display: none; }
@@ -858,8 +1032,12 @@ async function confirmRemoveAdjustment() {
 .end-time-preview { min-height: 34px; display: flex; align-items: center; font-size: 14px; }
 .move-times { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .move-note { font-size: 12px; }
 .day-move-list { display: grid; gap: 5px; max-height: 160px; overflow-y: auto; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-secondary); font-size: 12px; }
-.drag-ghost { position: fixed; z-index: 9999; pointer-events: none; width: 238px; background: var(--c-bg, var(--color-selected)); color: var(--c-fg, var(--color-primary)); border: 1px solid var(--c-border, var(--color-primary)); box-shadow: var(--shadow-lg); padding: 9px; border-radius: 7px; font-size: 12px; }
+.drag-layer { pointer-events: none; }
+.drag-ghost { position: fixed; z-index: 9999; pointer-events: none; box-shadow: var(--shadow-lg); }
+.drag-ghost.course-bar { animation: none; transition: none; transform: none; }
+.day-drag-ghost { width: 238px; background: var(--c-bg, var(--color-selected)); color: var(--c-fg, var(--color-primary)); border: 1px solid var(--c-border, var(--color-primary)); padding: 9px; border-radius: 7px; font-size: 12px; }
 .drop-preview { position: absolute; z-index: 20; pointer-events: none; display: flex; flex-direction: column; overflow: hidden; border: 2px dashed var(--color-primary); border-radius: 6px; padding: 3px; background: rgba(234,243,252,.9); color: var(--color-primary-text); font-size: 10px; box-shadow: 0 0 0 2px white; }
+.drop-preview.course-bar { border-width: 1px; border-left-width: 3px; border-color: var(--c-border); border-style: dashed; animation: none; transition: none; transform: none; opacity: .85; }
 .overlap-region { position: absolute; z-index: 2; display: flex; flex-direction: column; gap: 2px; overflow: hidden; padding: 2px; border: 2px dashed var(--color-danger); border-radius: 7px; background: #fff6f6; cursor: pointer; text-align: left; font: inherit; }
 .overlap-count { flex-shrink: 0; color: var(--color-danger); font-size: 9px; line-height: 12px; white-space: nowrap; }
 .overlap-region .course-bar { position: relative; inset: auto; flex: 1 1 0; width: 100%; min-height: 0; padding: 1px 3px; border-radius: 3px; outline: none; animation: none; display: flex; flex-direction: column; gap: 0; }
@@ -873,6 +1051,8 @@ async function confirmRemoveAdjustment() {
 @media (max-width: 599px) and (max-device-width: 599px), (max-height: 599px) and (max-device-height: 599px) and (min-aspect-ratio: 17/10) and (pointer: coarse) {
   .desktop-hint { display: none; }
   .phone-hint { display: inline; }
+  .teacher-legend { gap: 6px; }
+  .legend-filter { min-height: 36px; padding: 6px 10px; }
   .combined-board { display: none; }
   .mobile-two-weeks { display: grid; gap: 18px; }
   .mobile-week-block { overflow: hidden; border: 1px solid var(--color-border); border-radius: 16px; background: white; box-shadow: var(--shadow-sm); }
@@ -895,10 +1075,10 @@ async function confirmRemoveAdjustment() {
   .agenda-card { width: 100%; display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 8px; row-gap: 2px; text-align: left; border: 1px solid var(--c-border); border-left: 4px solid var(--c-border); border-radius: 9px; background: var(--c-bg); padding: 7px 9px; color: var(--c-fg); box-shadow: 0 1px 3px rgba(38,56,77,.05); }
   .agenda-card.trial { border-style: dashed; }
   .agenda-card.has-overlap { outline: 2px dashed var(--color-danger); outline-offset: -2px; }
-  .agenda-card strong { min-width: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .agenda-card strong { min-width: 0; font-size: 13px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .agenda-card > span:nth-of-type(2) { grid-column: 2; font-size: 11px; }
   .agenda-card .trial-count, .agenda-card .course-warning { grid-column: 2; }
-  .agenda-time { color: var(--c-fg); font-weight: 600; font-size: 11px; }
+  .agenda-time { color: var(--c-fg); font-weight: 400; font-size: 11px; }
   .week-empty { display: none; }
 }
 @media (max-width: 599px) and (max-device-width: 599px), (max-height: 599px) and (max-device-height: 599px) and (min-aspect-ratio: 17/10) and (pointer: coarse) {
@@ -938,4 +1118,21 @@ async function confirmRemoveAdjustment() {
   .bar-students { padding: 0 1px; font-size: 7px; }
 }
 .adjustment-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; font-size: 13px; }
+.desktop-layout .course-bar { padding: 3px 3px 16px; gap: 2px; border-radius: 6px; }
+.desktop-layout .course-bar.draggable { padding-right: 3px; }
+.desktop-layout .bar-top { display: block; flex-shrink: 0; }
+.desktop-layout .course-bar .bar-name { display: block; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: 14px; line-height: 1.2; }
+.desktop-layout .course-bar .bar-meta { flex-shrink: 0; overflow: visible; text-overflow: clip; font-size: 9px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.desktop-layout .bar-warning { position: absolute; top: 4px; right: 3px; font-size: 11px; line-height: 14px; }
+.desktop-layout .course-bar.has-warning .bar-name { padding-right: 12px; }
+.desktop-layout .course-bar .bar-bottom { flex-shrink: 0; flex-wrap: wrap; margin-top: 0; gap: 2px 3px; padding-right: 0; font-size: 11px; line-height: 1.2; }
+.desktop-layout .bar-teacher { min-width: 0; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.desktop-layout .bar-students { padding: 0 1px; font-size: 9px; }
+.desktop-layout .course-bar .bar-booking { flex-shrink: 0; align-self: flex-start; max-width: 100%; padding: 0 1px; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; font-size: 9px; line-height: 1.2; }
+.desktop-layout .course-bar .drag-handle { display: grid; top: auto; bottom: 2px; right: 2px; width: 12px; height: 14px; }
+.desktop-layout .drag-handle svg { width: 8px; height: 12px; }
+.desktop-layout .course-bar.compact { padding: 3px 3px 16px; gap: 2px; }
+.desktop-layout .course-bar.compact .bar-meta { display: block; }
+.desktop-layout .course-bar.compact .bar-bottom { display: flex; }
+.desktop-layout .course-bar.compact:is(:hover, :focus-visible) { min-height: 0; overflow: hidden; }
 </style>
