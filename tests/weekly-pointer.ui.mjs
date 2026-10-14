@@ -72,6 +72,7 @@ if (await page.locator('.detail-modal').isVisible()) throw new Error('拖动结�
 await page.reload()
 await card.waitFor()
 const crossHandle = card.locator('.drag-handle')
+await page.locator('.board-scroll').evaluate(element => { element.scrollLeft = 220 })
 const crossBox = await crossHandle.boundingBox()
 p = { x: crossBox.x + crossBox.width / 2, y: crossBox.y + crossBox.height / 2 }
 const otherLane = await page.locator('.combined-grid .day-lane').nth(9).boundingBox()

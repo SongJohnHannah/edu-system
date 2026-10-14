@@ -128,7 +128,7 @@ try {
       const fullCard = cards.filter({ hasText: '课程separate' })
       if (await fullCard.locator('.bar-meta').isHidden() || await fullCard.locator('.bar-bottom').isHidden()) throw new Error(`${size.name} 隐藏了 PC 课程卡上的时间或教师信息`)
       const nameWhiteSpace = await fullCard.locator('.bar-name').evaluate(element => getComputedStyle(element).whiteSpace)
-      if (nameWhiteSpace !== 'nowrap') throw new Error(`${size.name} 课程名样式与 PC 单行课卡不一致`)
+      if (nameWhiteSpace !== 'normal') throw new Error(`${size.name} 课程名未支持清晰换行`)
     }
 
     const markings = await cards.evaluateAll(elements => elements.map(element => ({
@@ -140,7 +140,7 @@ try {
     const byName = Object.fromEntries(markings.map(marking => [marking.name, marking]))
     for (const id of ['overlap-a', 'overlap-b']) {
       const card = byName[`课程${id}`]
-      if (!card?.overlap || card.outline !== 'dashed') throw new Error(`${size.name} 重叠课程未显示红色虚线：${id}`)
+      if (!card?.overlap || card.outline !== (compact ? 'dashed' : 'none')) throw new Error(`${size.name} 重叠课程虚线显示状态错误：${id}`)
     }
     for (const id of ['separate', 'next-a', 'next-b']) {
       const card = byName[`课程${id}`]
@@ -190,7 +190,7 @@ try {
     await page.locator('.detail-modal h2').getByText('课程next-a').waitFor({ state: 'visible' })
     await context.close()
   }
-  console.log('两周布局、教师区分色、实际时间重叠红色虚线、PC/iPad/含宽屏的手机竖横屏均通过')
+  console.log('两周布局、教师区分色、PC/iPad 重叠并排及虚线关闭、手机竖横屏原有标记均通过')
 } finally {
   await browser.close()
 }

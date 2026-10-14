@@ -4,6 +4,10 @@
       <div>
         <h1 class="page-title">学生管理</h1>
         <p class="page-subtitle">管理所有学生信息和课时</p>
+        <div v-if="!loading && !loadError" class="student-summary" aria-live="polite">
+          <span class="student-total">学生总数 <strong>{{ students.length }}</strong> 人</span>
+          <span v-if="archivedCount" class="summary-note">含已归档 {{ archivedCount }} 人</span>
+        </div>
       </div>
       <div class="header-actions">
         <OfficeButton class="btn btn-secondary" @click="showBatchModal = true" :disabled="loading || loadError">
@@ -22,13 +26,19 @@
     </div>
 
     <div class="search-bar" v-if="!loading && !loadError">
-      <div class="scope-filter"><OfficeButton class="btn btn-text" :class="{ selected: scopeFilter === 'all' }" @click="scopeFilter = 'all'">全部学生</OfficeButton><OfficeButton class="btn btn-text" :class="{ selected: scopeFilter === 'mine' }" @click="scopeFilter = 'mine'">我录入的</OfficeButton><OfficeButton class="btn btn-text" :class="{ selected: showArchived }" @click="showArchived = !showArchived">{{ showArchived ? '隐藏归档' : '查看归档' }}</OfficeButton></div>
-      <OfficeInput
-        type="text"
-        class="input"
-        placeholder="搜索学生姓名或电话..."
-        v-model="searchText"
-      />
+      <div class="filter-heading">
+        <div class="scope-filter"><OfficeButton class="btn btn-text" :class="{ selected: scopeFilter === 'all' }" @click="scopeFilter = 'all'">全部学生</OfficeButton><OfficeButton class="btn btn-text" :class="{ selected: scopeFilter === 'mine' }" @click="scopeFilter = 'mine'">我录入的</OfficeButton><OfficeButton class="btn btn-text" :class="{ selected: showArchived }" @click="setStatusFilter(showArchived ? 'all' : 'deleted')">{{ showArchived ? '隐藏归档' : '查看归档' }}</OfficeButton></div>
+        <span class="filter-count" role="status">当前显示 {{ filteredStudents.length }} 人</span>
+      </div>
+      <div class="search-controls">
+        <OfficeInput type="text" class="input student-search" size="large" clearable
+          placeholder="搜索学生姓名或电话..." input-aria-label="搜索学生姓名或电话" v-model="searchText" />
+        <div class="status-search">
+          <span id="student-status-label">状态</span>
+          <NSelect class="student-status-select" :value="statusFilter" :options="statusOptions" size="large"
+            aria-labelledby="student-status-label" @update:value="setStatusFilter" />
+        </div>
+      </div>
     </div>
 
     <div class="table-container desktop-only" v-if="!loading && !loadError">
@@ -85,8 +95,9 @@
         </tbody>
       </OfficeTable>
       <div class="empty-state" v-else>
-        <p>暂无学生数据</p>
-        <div class="empty-actions">
+        <p>{{ students.length ? '没有符合筛选条件的学生' : '暂无学生数据' }}</p>
+        <OfficeButton v-if="students.length" class="btn btn-secondary" @click="clearFilters">清除筛选</OfficeButton>
+        <div v-else class="empty-actions">
           <OfficeButton class="btn btn-secondary" @click="showBatchModal = true">批量添加</OfficeButton>
           <OfficeButton class="btn btn-primary" @click="openAddModal">添加第一个学生</OfficeButton>
         </div>
@@ -121,8 +132,9 @@
       </div>
     </div>
     <div class="empty-state mobile-only" v-if="!loading && !loadError && filteredStudents.length === 0">
-      <p>暂无学生数据</p>
-      <div class="empty-actions">
+      <p>{{ students.length ? '没有符合筛选条件的学生' : '暂无学生数据' }}</p>
+      <OfficeButton v-if="students.length" class="btn btn-secondary" @click="clearFilters">清除筛选</OfficeButton>
+      <div v-else class="empty-actions">
         <OfficeButton class="btn btn-secondary" @click="showBatchModal = true">批量添加</OfficeButton>
         <OfficeButton class="btn btn-primary" @click="openAddModal">添加第一个学生</OfficeButton>
       </div>
@@ -322,6 +334,22 @@ const auth = useAuthStore()
 const isAdmin = computed(() => auth.isAdmin)
 const scopeFilter = ref('all')
 const showArchived = ref(false)
+const statusFilter = ref('all')
+const statusOptions = [
+  { label: '全部状态（未归档）', value: 'all' },
+  { label: '正常', value: 'active' },
+  { label: '退学', value: 'quit' },
+  { label: '已归档', value: 'deleted' }
+]
+function setStatusFilter(value) {
+  statusFilter.value = value
+  showArchived.value = value === 'deleted'
+}
+function clearFilters() {
+  searchText.value = ''
+  scopeFilter.value = 'all'
+  setStatusFilter('all')
+}
 const teachers = ref([])
 const enrollmentOptions = [{ label: '待报名（可预约试听）', value: 'pending' }, { label: '已报名', value: 'enrolled' }]
 function canEdit(student) { return isAdmin.value || auth.isTeacher && (student.createdBy === 'admin' || !!auth.teacherId && student.creatorId === auth.teacherId) }
@@ -401,13 +429,15 @@ function handleVisibilityChange() {
 onMounted(() => document.addEventListener('visibilitychange', handleVisibilityChange))
 onUnmounted(() => { loadRequest++; document.removeEventListener('visibilitychange', handleVisibilityChange) })
 
+const archivedCount = computed(() => students.value.filter(student => student.status === 'deleted').length)
 const filteredStudents = computed(() => {
   let result = students.value.filter(s => (showArchived.value ? s.status === 'deleted' : s.status !== 'deleted') &&
+    (statusFilter.value === 'all' || (s.status || 'active') === statusFilter.value) &&
     (scopeFilter.value !== 'mine' || !!auth.teacherId && s.creatorId === auth.teacherId || isAdmin.value && s.createdBy === 'admin'))
 
   // 按姓名/电话搜索
-  if (searchText.value) {
-    const search = searchText.value.toLowerCase()
+  if (searchText.value?.trim()) {
+    const search = searchText.value.trim().toLowerCase()
     result = result.filter(s =>
       s.name.toLowerCase().includes(search) ||
       (s.phone || '').includes(search)
@@ -722,8 +752,17 @@ function goToHistory(studentId) {
 </script>
 
 <style scoped>
-.scope-filter { display: flex; gap: 6px; margin-bottom: 10px; }
+.scope-filter { display: flex; flex-wrap: wrap; gap: 6px; }
 .scope-filter .selected { background: var(--color-selected); font-weight: 650; }
+.student-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; font-size: 13px; }
+.student-total { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border: 1px solid var(--color-border); border-radius: 20px; background: var(--color-selected); color: var(--color-primary); }
+.student-total strong { font-size: 21px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.summary-note, .filter-count { font-size: 13px; color: var(--color-text-secondary); }
+.filter-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.search-controls { display: flex; align-items: center; gap: 16px; }
+.student-search { flex: 1; min-width: 0; }
+.status-search { display: flex; align-items: center; gap: 10px; color: var(--color-text-secondary); font-size: 14px; }
+.student-status-select { width: 210px; }
 .mobile-creator { display: block; color: var(--color-text-secondary); font-size: 11px; }
 .students {
   max-width: 1000px;
@@ -756,6 +795,11 @@ function goToHistory(studentId) {
 
 .search-bar {
   margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: white;
+  box-shadow: var(--shadow-sm);
 }
 
 .table-container {
@@ -1193,6 +1237,9 @@ function goToHistory(studentId) {
 }
 
 @media (max-width: 768px) {
+  .search-controls { flex-direction: column; align-items: stretch; gap: 12px; }
+  .status-search { width: 100%; }
+  .student-status-select { flex: 1; width: auto; min-width: 0; }
   .page-header {
     flex-direction: column;
     align-items: flex-start;

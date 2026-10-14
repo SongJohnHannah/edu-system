@@ -1,4 +1,5 @@
-import { chromium } from '@playwright/test'
+import assert from 'node:assert/strict'
+import { chromium, expect } from '@playwright/test'
 
 const sourceDate = '2026-10-03'
 const targetDate = '2026-10-06'
@@ -48,11 +49,22 @@ try {
       if (width >= 600 && scope === 'once') {
         const handle = page.getByRole('button', { name: `拖动或点击整体调整 ${sourceDate} 的课程` })
         await handle.waitFor({ state: 'visible' })
+        await page.locator('.board-scroll').evaluate(element => { element.scrollLeft = 460 })
         const from = await handle.boundingBox()
         const to = await page.locator(`.combined-grid .day-lane[data-date="${targetDate}"]`).boundingBox()
+        const originalSizes = await page.locator(`.day-lane[data-date="${sourceDate}"] .schedule-item`).evaluateAll(elements =>
+          elements.map(element => ({ name: element.querySelector('.bar-name').textContent,
+            width: parseFloat(getComputedStyle(element).width), height: parseFloat(getComputedStyle(element).height) })))
         await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
         await page.mouse.down()
         await page.mouse.move(to.x + to.width / 2, to.y + 150)
+        await expect(page.locator('.drop-preview')).toHaveCount(originalSizes.length)
+        for (const original of originalSizes) {
+          const preview = page.locator('.drop-preview').filter({ hasText: original.name })
+          const box = await preview.boundingBox()
+          assert.ok(Math.abs(box.width - original.width) < 1, 'day move placeholder keeps each original card width')
+          assert.ok(Math.abs(box.height - original.height) < 1, 'day move placeholder keeps each original card height')
+        }
         await page.mouse.up()
       } else {
         const buttonName = width >= 600 ? `拖动或点击整体调整 ${sourceDate} 的课程` : `整体调整 ${sourceDate} 的课程`

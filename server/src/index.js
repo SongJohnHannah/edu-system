@@ -135,6 +135,7 @@ app.use(errorHandler)
 
 const server = app.listen(PORT, () => {
   console.log(`[嘉言思听教务系统] 后端服务运行在 http://localhost:${PORT}`)
+  if (process.send) process.send('ready')
 })
 
 // 优雅关闭

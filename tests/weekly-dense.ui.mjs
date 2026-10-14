@@ -95,7 +95,7 @@ try {
     if (colors.length !== names.length) throw new Error(`${size.name}: ${names.length} 位教师仅有 ${colors.length} 种颜色`)
     if (await cards.filter({ has: page.locator('.trial-count') }).count() < 4) throw new Error(`${size.name}: 试听标记丢失`)
     const overlap = await cards.evaluateAll(elements => elements.filter(el => el.classList.contains('has-overlap')).length)
-    if (overlap !== 4) throw new Error(`${size.name}: 只有两组真正重叠的四张课卡应有红色虚线，实得 ${overlap}`)
+    if (overlap !== 4) throw new Error(`${size.name}: 应标记两组真正重叠的四张课卡，实得 ${overlap}`)
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 2)) throw new Error(`${size.name}: 页面横向溢出`)
     const weeks = await page.locator(size.width >= 600 ? '.combined-week-head > span' : '.mobile-week-block').evaluateAll(elements => elements.map(element => {
       const box = element.getBoundingClientRect()
@@ -117,13 +117,12 @@ try {
     if (size.name === 'ipad-portrait') {
       await page.keyboard.press('Escape')
       await cards.filter({ hasText: '演讲训练' }).first().click()
-      await page.locator('.overlap-modal').getByRole('button', { name: /演讲训练/ }).click()
       await page.locator('.detail-modal').getByText('演讲训练').first().waitFor({ state: 'visible' })
     }
     if (errors.length) throw new Error(`${size.name}: ${errors.join('; ')}`)
     await context.close()
   }
-  console.log('dense 72-class two-week layout, 12 teacher colors, trial markers and overlap outlines passed: PC, iPad landscape/portrait, phone')
+  console.log('dense 72-class two-week layout, 12 teacher colors, trial markers and overlap cards passed: PC, iPad landscape/portrait, phone')
 } finally {
   await browser.close()
 }

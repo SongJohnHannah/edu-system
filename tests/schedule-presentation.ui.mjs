@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chromium } from '@playwright/test'
+import { chromium, expect } from '@playwright/test'
 
 const base = process.env.UI_BASE_URL || 'http://127.0.0.1:4174'
 const browser = await chromium.launch({ headless: true })
@@ -46,6 +46,8 @@ try {
       if (width >= 600) assert.ok(box.x >= 24, 'PC/iPad 弹窗没有两侧留白')
     })
     await page.keyboard.press('Escape')
+    await expect(create).toHaveCount(0)
+    await expect(page.locator('.n-modal-mask')).toHaveCount(0)
     await cards.filter({ hasText: '独立课程' }).click()
     await page.getByRole('button', { name: '修改日期与时间' }).click()
     const move = page.locator('.move-modal')
@@ -60,52 +62,60 @@ try {
       assert.ok(offset < 7, `单选框与文字偏移 ${offset}px`)
     })
     await check('日期选择使用统一组件', async () => {
-      assert.equal(await move.locator('.office-date-picker').count(), 1)
+      await expect(move.locator('.office-date-picker')).toHaveCount(1)
       await move.locator('.office-date-picker input').click()
       await page.locator('.n-date-panel').waitFor()
       const panel = await page.locator('.n-date-panel').boundingBox()
       assert.ok(panel.x >= 0 && panel.x + panel.width <= width + 1, '日期面板溢出屏幕')
       if (process.env.PRESENTATION_SCREENSHOTS) await page.screenshot({ path: `.qa/date-picker-${width}.png` })
       await move.locator('.move-course').click()
+      await page.locator('.n-date-panel').waitFor({ state: 'hidden' })
     })
     await page.keyboard.press('Escape')
+    await expect(move).toHaveCount(0)
+    await expect(page.locator('.n-modal-mask')).toHaveCount(0)
     if (width >= 600) {
       await check('拖动有目标时段占位', async () => {
         const handle = cards.filter({ hasText: '独立课程' }).locator('.drag-handle')
         await cards.filter({ hasText: '独立课程' }).hover()
+        await handle.scrollIntoViewIfNeeded()
         const origin = await handle.boundingBox()
         const lane = await page.locator('.day-lane[data-date="2026-10-01"]').boundingBox()
         await page.mouse.move(origin.x + origin.width / 2, origin.y + origin.height / 2)
         await page.mouse.down()
-        await page.mouse.move(lane.x + lane.width / 2, lane.y + 120, { steps: 5 })
+        const timeOffset = await page.locator('.time-cell').nth(5).evaluate(element => parseFloat(element.style.top))
+        await page.mouse.move(lane.x + lane.width / 2, lane.y + timeOffset + 2, { steps: 5 })
         assert.equal(await page.locator('.drop-preview').count(), 1, '目标时段没有占位卡片')
         assert.ok(await page.locator('.drop-preview').innerText().then(text => text.includes('10:00') && text.includes('11:00')))
       })
       await page.mouse.up()
       await page.keyboard.press('Escape')
-      await check('重叠课程占用同一横向位置', async () => {
+      await check('重叠课程等宽向右排开，暂时关闭虚线', async () => {
         const a = await cards.filter({ hasText: 'PU 0 周三' }).boundingBox()
         const b = await cards.filter({ hasText: '主题英语启蒙' }).boundingBox()
-        assert.ok(Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) > a.width * .8, '课程仍被分成左右两列')
-        assert.equal(await cards.filter({ hasText: 'PU 0 周三' }).locator('.drag-handle').count(), 0, '重叠课程仍可拖动')
-        assert.equal(await page.locator('.day-head[data-date="2026-09-30"] .day-drag-handle').count(), 0, '整天拖动可绕过重叠限制')
-        assert.equal(await page.locator('.overlap-region').evaluate(element => getComputedStyle(element).borderStyle), 'dashed')
+        assert.ok(b.x >= a.x + a.width, '重叠课程未向右分列')
+        assert.ok(Math.abs(a.width - b.width) < 1, '重叠课程宽度不一致')
+        assert.equal(await cards.filter({ hasText: 'PU 0 周三' }).locator('.drag-handle').count(), 1, '重叠课程没有拖动手柄')
+        assert.equal(await page.locator('.day-head[data-date="2026-09-30"] .day-drag-handle').count(), 1, '重叠课程日期没有整天调整入口')
+        assert.equal(await page.locator('.overlap-region').count(), 0)
+        assert.equal(await cards.filter({ hasText: 'PU 0 周三' }).evaluate(element => getComputedStyle(element).outlineStyle), 'none')
       })
     }
-    // Click an exposed part of the stacked group, or its dedicated chooser surface.
-    await page.locator('.overlap-region, .agenda-card.has-overlap, .course-bar.has-overlap').filter({ visible: true }).first().click()
-    await check('点击重叠课程先选择编辑对象', async () => {
-      assert.equal(await page.locator('.overlap-modal').count(), 1, '没有弹出课程选择窗口')
-      const chooser = page.locator('.overlap-modal')
-      assert.ok(await chooser.getByRole('button', { name: /PU 0 周三/ }).isVisible())
-      await chooser.getByRole('button', { name: /主题英语启蒙/ }).click()
+    await cards.filter({ hasText: '主题英语启蒙' }).click()
+    await check(width >= 600 ? '点击并排课程直接查看对应详情' : '手机重叠课程继续先选择编辑对象', async () => {
+      if (width < 600) {
+        assert.equal(await page.locator('.overlap-modal').count(), 1, '没有弹出课程选择窗口')
+        const chooser = page.locator('.overlap-modal')
+        assert.ok(await chooser.getByRole('button', { name: /PU 0 周三/ }).isVisible())
+        await chooser.getByRole('button', { name: /主题英语启蒙/ }).click()
+      } else assert.equal(await page.locator('.overlap-modal').count(), 0)
       assert.ok(await page.locator('.detail-modal').getByRole('heading', { name: '主题英语启蒙' }).isVisible())
     })
     await page.keyboard.press('Escape')
     if (width >= 600) {
       await page.getByRole('button', { name: '我的课程' }).click()
-      await check('教师筛选不能绕过重叠禁拖限制', async () => {
-        assert.equal(await cards.filter({ hasText: 'PU 0 周三' }).locator('.drag-handle').count(), 0)
+      await check('教师筛选后仍可拖动重叠课程', async () => {
+        assert.equal(await cards.filter({ hasText: 'PU 0 周三' }).locator('.drag-handle').count(), 1)
       })
       await page.getByRole('button', { name: '全部教师' }).click()
     }
