@@ -54,7 +54,7 @@ try {
         if (JSON.stringify(actualOrder) !== JSON.stringify(expectedOrder)) throw new Error(`${width}px ${role} 手机导航顺序与 PC/iPad 不一致：${actualOrder.join(', ')}`)
         const missingIcons = mobileLinks.filter(item => !item.icon).map(item => item.route)
         if (missingIcons.length) throw new Error(`${width}px ${role} 手机导航缺少图标：${missingIcons.join(', ')}`)
-        const missingActionIcons = await page.locator('.mobile-more-menu button:not(:has(svg))').allTextContents()
+        const missingActionIcons = await page.locator('.mobile-more-menu button:not(:has(svg, [role="img"]))').allTextContents()
         if (missingActionIcons.length) throw new Error(`${width}px ${role} 手机更多操作缺少图标：${missingActionIcons.join(', ')}`)
       } else {
         if (await page.getByRole('button', { name: '打开导航' }).count()) throw new Error(`${width}px PC/iPad 导航仍需多点一次打开`)

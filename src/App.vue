@@ -8,7 +8,10 @@
     <header v-if="!isLoginPage" class="header desktop-nav">
       <div class="header-content">
         <div class="logo">
-          <BrandLogo />
+          <button type="button" class="brand-theme-switch" :aria-label="themeSwitchLabel" :title="themeSwitchLabel" @click="switchTheme">
+            <BrandLogo />
+            <span class="theme-color-dot" aria-hidden="true"></span>
+          </button>
           <span class="logo-text">教务系统</span>
         </div>
         <nav class="nav">
@@ -64,6 +67,9 @@
       <div id="mobile-more-actions" class="mobile-more-menu" @click.stop>
         <AppNavLink v-for="item in moreNavItems" :key="item.to" :item="item" link-class="more-item" show-icon @select="showMoreMenu = false" />
         <AppNavLink v-if="authUser" :item="accountNavItem" link-class="more-item" show-icon @select="showMoreMenu = false" />
+        <button type="button" class="more-item mobile-theme-switch" :aria-label="themeSwitchLabel" @click="switchTheme">
+          <BrandLogo /><span>主题：{{ selectedTheme.name }}</span>
+        </button>
         <button v-if="isAdmin" type="button" class="more-item" @click="showMoreMenu = false; showBackupModal = true"><NavIcon name="backup" :size="18" /><span>数据备份与恢复</span></button>
         <button v-if="authUser" type="button" class="more-item more-logout" @click="showMoreMenu = false; handleLogout()"><NavIcon name="logout" :size="18" /><span>退出登录</span></button>
       </div>
@@ -127,17 +133,17 @@ import { NConfigProvider, zhCN, dateZhCN } from 'naive-ui'
 import { navigationItems } from './navigation.js'
 import { downloadBackup, importData } from './utils/storage'
 import { useToast } from './composables/useToast'
+import { useAppTheme } from './composables/useAppTheme.js'
 
-const themeOverrides = {
-  common: {
-    primaryColor: '#4178B9', primaryColorHover: '#31689F', primaryColorPressed: '#285A8C',
-    primaryColorSuppl: '#4178B9', textColorBase: '#26384D', textColor2: '#63758A',
-    borderColor: '#DBE5EF', bodyColor: '#F8FAFD', cardColor: '#FFFFFF',
-    borderRadius: '10px', fontFamily: "Inter, 'Microsoft YaHei', 'PingFang SC', sans-serif"
-  }
-}
 const router = useRouter()
 const toast = useToast()
+const isLoginPage = computed(() => router.currentRoute.value.path === '/login')
+const { selectedTheme, themeSwitchLabel, themeOverrides, cycleTheme } = useAppTheme(isLoginPage)
+
+function switchTheme() {
+  cycleTheme()
+  toast.info(`已切换为${selectedTheme.value.name}主题`)
+}
 
 // 全局 API 加载进度条
 const apiLoading = ref(false)
@@ -191,7 +197,6 @@ const appVersion = __APP_VERSION__
 
 const authUser = ref(null)
 
-const isLoginPage = computed(() => router.currentRoute.value.path === '/login')
 const isAdmin = computed(() => authUser.value?.role === 'admin')
 const visibleNavItems = computed(() => navigationItems.filter(item => !item.adminOnly || isAdmin.value))
 const primaryNavItems = computed(() => visibleNavItems.value.filter(item => item.section === 'primary'))
@@ -325,7 +330,8 @@ async function confirmImport() {
 
 .app {
   min-height: 100vh;
-  background: var(--color-bg-secondary);
+  background: var(--app-background, var(--color-bg-secondary));
+  background-size: 100% 100%;
   padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
@@ -364,6 +370,29 @@ async function confirmImport() {
   color: var(--color-text);
   white-space: nowrap;
 }
+
+.brand-theme-switch {
+  position: relative;
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: box-shadow .18s ease;
+}
+.brand-theme-switch:hover { box-shadow: 0 0 0 3px var(--color-selected); }
+.theme-color-dot {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 0 2px white;
+}
+.mobile-theme-switch :deep(.brand-logo) { width: 64px; height: 36px; }
 
 .nav {
   display: flex;
@@ -667,7 +696,7 @@ button.more-item { width: 100%; border: 0; background: white; text-align: left; 
     background: white;
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-lg);
-    overflow: hidden;
+    overflow-x: hidden;
     animation: slideUp 0.2s ease;
   }
 
