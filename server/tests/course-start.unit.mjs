@@ -77,6 +77,30 @@ test('an explicit start today is accepted even after the class ends', async t =>
   assert.equal((await listOccurrences('2026-10-09', '2026-10-09', conn)).length, 1)
 })
 
+test('attendance accepts a custom deduction without changing the course default', async t => {
+  for (const hours of [0.5, 1, 2.5, 999.5, '3.5']) {
+    await t.test(String(hours), async child => {
+      const { data } = storage(child, 16)
+      const course = await courses.create(input)
+      const record = await attendance.create({ courseId: course.id, date: '2026-10-09', studentIds: ['s1'], hoursDeducted: hours }, 't1', { username: 'teacher1' })
+      assert.equal(record.hoursDeducted, Number(hours))
+      assert.equal(data.usedHours, Number(hours))
+      assert.equal(data.records[0][3], Number(hours))
+      assert.equal(data.courses[0].hours_per_class, 1.5)
+      await assert.rejects(attendance.create({ courseId: course.id, date: '2026-10-09', studentIds: ['s1'], hoursDeducted: 1 }, 't1', { username: 'teacher1' }), error => error.status === 409)
+      assert.equal(data.usedHours, Number(hours))
+    })
+  }
+})
+
+test('attendance rejects invalid custom hours before accessing the database', async t => {
+  t.mock.method(pool, 'getConnection', () => { throw new Error('unexpected database connection') })
+  for (const hours of [null, '', ' ', 0, -0.5, 0.3, 1.25, 1000, NaN, Infinity, 'bad', true, [], {}]) {
+    await assert.rejects(attendance.create({ courseId: 'c1', date: '2026-10-09', studentIds: ['s1'], hoursDeducted: hours }, null, { username: 'admin' }),
+      error => error.status === 400 && /半课时倍数/.test(error.message))
+  }
+})
+
 test('explicit future starts and other weekdays do not produce an extra class today', async t => {
   const { conn, data } = storage(t, 16)
   const course = await courses.create({ ...input, effectiveStartDate: '2026-10-16' })
