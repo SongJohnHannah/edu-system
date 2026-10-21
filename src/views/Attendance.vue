@@ -68,21 +68,30 @@
       <OfficeModal v-model:show="showConfirmModal" @update:show="value => { if (!value) { showConfirmModal = false } }">
         <div class="modal modal-sm">
           <h2 class="modal-title">确认点名</h2>
+          <div class="confirm-info">
+            <p>课程：<strong>{{ selectedCourse?.name }}</strong></p>
+            <p>出勤学生：<strong>{{ checkedStudents.length }}</strong> 人</p>
+          </div>
+          <div class="attendance-hours">
+            <label for="attendance-hours">本次扣除课时（每人）</label>
+            <div class="hours-adjuster">
+              <OfficeButton type="button" class="btn btn-secondary" aria-label="减少 0.5 课时" @click="adjustAttendanceHours(-0.5)" :disabled="submitting || !validAttendanceHours || attendanceHours <= 0.5">−0.5</OfficeButton>
+              <input id="attendance-hours" class="input" type="number" v-model.number="attendanceHours" min="0.5" max="999.5" step="0.5" inputmode="decimal" aria-label="本次扣除课时" :aria-invalid="!validAttendanceHours" aria-describedby="attendance-hours-hint" :disabled="submitting" />
+              <OfficeButton type="button" class="btn btn-secondary" aria-label="增加 0.5 课时" @click="adjustAttendanceHours(0.5)" :disabled="submitting || !validAttendanceHours || attendanceHours >= 999.5">+0.5</OfficeButton>
+            </div>
+            <p id="attendance-hours-hint" class="hours-hint">课程默认 {{ selectedCourse?.hoursPerClass ?? 1 }} 课时，调整仅对本次点名生效。</p>
+            <p v-if="!validAttendanceHours" class="hours-error" role="alert">课时须为 0.5 至 999.5 的半课时倍数</p>
+            <p class="hours-total">共计：<strong>{{ validAttendanceHours ? checkedStudents.length * attendanceHours : '—' }}</strong> 课时</p>
+          </div>
           <div class="confirm-warning" v-if="insufficientStudents.length > 0">
             <p>⚠️ 以下学生课时不足，扣除后余额将为负数：</p>
             <ul class="insufficient-list">
-              <li v-for="s in insufficientStudents" :key="s.name">{{ s.name }}（{{ s.remaining }}）</li>
+              <li v-for="s in insufficientStudents" :key="s.id">{{ s.name }}（{{ s.remaining }}）</li>
             </ul>
-          </div>
-          <div class="confirm-info" v-if="insufficientStudents.length === 0">
-            <p>课程：<strong>{{ selectedCourse?.name }}</strong></p>
-            <p>出勤学生：<strong>{{ checkedStudents.length }}</strong> 人</p>
-            <p>扣除课时：<strong>{{ selectedCourse?.hoursPerClass ?? 1 }}</strong> 课时/人</p>
-            <p>共计：<strong>{{ checkedStudents.length * (selectedCourse?.hoursPerClass ?? 1) }}</strong> 课时</p>
           </div>
           <div class="modal-actions">
             <OfficeButton class="btn btn-secondary" @click="showConfirmModal = false">取消</OfficeButton>
-            <OfficeButton class="btn btn-primary" @click="submitAttendance" :disabled="submitting">{{ submitting ? '提交中...' : '确认点名' }}</OfficeButton>
+            <OfficeButton class="btn btn-primary" @click="submitAttendance" :disabled="submitting || !validAttendanceHours">{{ submitting ? '提交中...' : '确认点名' }}</OfficeButton>
           </div>
         </div>
       </OfficeModal>
@@ -253,6 +262,9 @@ function closeMonthDropdown(e) {
 const checkedStudents = ref([])
 const courseStudents = ref([])
 const showConfirmModal = ref(false)
+const attendanceHours = ref(1)
+const validAttendanceHours = computed(() => Number.isFinite(attendanceHours.value)
+  && attendanceHours.value >= 0.5 && attendanceHours.value <= 999.5 && attendanceHours.value % 0.5 === 0)
 
 // 选择性删除相关
 const showDeleteModal = ref(false)
@@ -260,7 +272,15 @@ const deleteTargetRecord = ref(null)
 const deleteCheckedStudents = ref([])
 
 // 课时不足的学生
-const insufficientStudents = ref([])
+const insufficientStudents = computed(() => validAttendanceHours.value ? checkedStudents.value
+  .map(id => courseStudents.value.find(s => s.id === id))
+  .filter(s => s && getRemainingHours(s) < attendanceHours.value)
+  .map(s => ({ id: s.id, name: s.name, remaining: formatRemainingShort(s) })) : [])
+
+function adjustAttendanceHours(delta) {
+  if (submitting.value || !validAttendanceHours.value) return
+  attendanceHours.value = Math.min(999.5, Math.max(0.5, attendanceHours.value + delta))
+}
 
 function getRemainingHours(student) {
   return (student.totalHours || 0) - (student.usedHours || 0)
@@ -294,11 +314,7 @@ async function handleConfirmClick() {
     if (date === selectedDate.value && selectedCourse.value?.id === course.id) toast.error(error.message || '点名记录检查失败')
     return
   }
-  const hoursNeeded = course.hoursPerClass ?? 1
-  insufficientStudents.value = checkedStudents.value
-    .map(id => courseStudents.value.find(s => s.id === id))
-    .filter(s => s && getRemainingHours(s) < hoursNeeded)
-    .map(s => ({ name: s.name, remaining: formatRemainingShort(s) }))
+  attendanceHours.value = Number(course.hoursPerClass ?? 1)
   showConfirmModal.value = true
 }
 
@@ -335,7 +351,7 @@ async function loadHistory() {
     const page = await getAttendancePage({ limit: 50, includeVoided: includeVoided.value, scope: historyScope.value,
       courseId: filterCourseId.value, month: filterMonth.value })
     if (requestId !== historyRequestId) return
-    attendanceRecords.value = (page.data || []).reverse()
+    attendanceRecords.value = page.data || []
     hasMoreRecords.value = !!page.hasMore
     toast.clearError(historyErrorToast)
     historyErrorToast = null
@@ -424,8 +440,8 @@ async function loadMoreRecords() {
     const page = await getAttendancePage({ limit: 50, offset: currentCount, includeVoided: includeVoided.value, scope: historyScope.value,
       courseId: filterCourseId.value, month: filterMonth.value })
     if (requestId !== historyRequestId) return
-    const newData = (page.data || []).reverse()
-    attendanceRecords.value = [...newData, ...attendanceRecords.value]
+    const newData = page.data || []
+    attendanceRecords.value = [...attendanceRecords.value, ...newData]
     hasMoreRecords.value = !!page.hasMore
   } catch (error) { toast.error(error.message || '点名记录加载失败') }
   finally { loadingMore.value = false }
@@ -498,10 +514,12 @@ watch(submitting, busy => { if (!busy) refreshToday() })
 async function submitAttendance() {
   if (!selectedCourse.value || checkedStudents.value.length === 0) return
   if (submitting.value) return
+  if (!validAttendanceHours.value) return toast.error('课时须为 0.5 至 999.5 的半课时倍数')
+  const hoursDeducted = attendanceHours.value
 
   submitting.value = true
   try {
-    // 重新读取实际课次；固定课表、交接和课时规则可能在弹窗打开后改变。
+    // 重新读取实际课次；固定课表、交接和名单可能在弹窗打开后改变。
     const freshOccurrences = await getCourseOccurrences(selectedDate.value, selectedDate.value)
     const freshCourse = (freshOccurrences || []).find(c => c.courseId === selectedCourse.value.courseId && c.originalDate === selectedCourse.value.originalDate)
     if (!freshCourse || (currentUserTeacherId.value && freshCourse.teacherId !== currentUserTeacherId.value)) {
@@ -522,17 +540,18 @@ async function submitAttendance() {
 
     // 记录点名（后端会自动扣课时）
     const attendedIds = [...checkedStudents.value]
-    await addAttendance({
+    const record = await addAttendance({
       courseId: freshCourse.courseId,
       date: selectedDate.value,
       originalDate: freshCourse.originalDate,
-      studentIds: attendedIds
+      studentIds: attendedIds,
+      hoursDeducted
     })
 
     // 写入已完成，后续读取失败不能再把点名提示为失败。
     showConfirmModal.value = false
     students.value = students.value.map(student => attendedIds.includes(student.id)
-      ? { ...student, usedHours: Number(student.usedHours || 0) + Number(freshCourse.hoursPerClass ?? 1) }
+      ? { ...student, usedHours: Number(student.usedHours || 0) + Number(record.hoursDeducted ?? hoursDeducted) }
       : student)
     let refreshFailed = false
     try { students.value = await getStudents() || [] }
@@ -1098,6 +1117,15 @@ async function confirmDeleteStudents() {
 .confirm-info {
   margin-bottom: 24px;
 }
+
+.attendance-hours { margin-bottom: 20px; }
+.attendance-hours > label { display: block; font-size: 14px; margin-bottom: 8px; }
+.hours-adjuster { display: flex; align-items: center; gap: 8px; }
+.hours-adjuster .btn { flex-shrink: 0; padding: 8px 12px; }
+.hours-adjuster .input { flex: 1; width: 100%; min-width: 0; text-align: center; }
+.hours-hint { color: var(--color-text-secondary); font-size: 12px; margin-top: 8px; }
+.hours-error { color: var(--color-danger); font-size: 13px; margin-top: 6px; }
+.hours-total { margin-top: 12px; }
 
 .confirm-warning {
   background: #fff8ea;

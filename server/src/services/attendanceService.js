@@ -5,6 +5,15 @@ import { listOccurrences, acquireScheduleLock, closeScheduleConnection } from '.
 
 const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }) }
 const idsOf = value => typeof value === 'string' ? JSON.parse(value) : (value || [])
+function validateHours(value) {
+  const hours = Number(value)
+  if (!['number', 'string'].includes(typeof value) || String(value).trim() === ''
+    || !Number.isFinite(hours) || hours < 0.5 || hours > 999.5 || hours % 0.5 !== 0) {
+    fail('扣除课时须为 0.5 至 999.5 的半课时倍数')
+  }
+  return hours
+}
+
 function formatAttendance(row) {
   return {
     ...row, date: formatDate(row.date), courseId: row.course_id,
@@ -58,6 +67,7 @@ export async function getAll(teacherScope, { limit = 50, offset = 0, includeVoid
 
 export async function create(data, teacherScope, user) {
   if (!Array.isArray(data.studentIds) || !data.studentIds.length || new Set(data.studentIds).size !== data.studentIds.length) fail('请选择有效的正式课程学生')
+  const requestedHours = data.hoursDeducted === undefined ? undefined : validateHours(data.hoursDeducted)
   const conn = await pool.getConnection()
   let locked = false
   try {
@@ -72,8 +82,7 @@ export async function create(data, teacherScope, user) {
       : matches.length === 1 ? matches[0] : null
     if (matches.length > 1 && !data.originalDate) fail('同日有多节该课程，请选择具体课次')
     if (!occurrence) fail('所选日期没有该正式课程')
-    const hours = Number(occurrence.hoursPerClass)
-    if (data.hoursDeducted !== undefined && Number(data.hoursDeducted) !== hours) fail('扣除课时须与该课次课时一致')
+    const hours = requestedHours ?? validateHours(occurrence.hoursPerClass)
     if (teacherScope && occurrence.teacherId !== teacherScope) fail('只能点名自己的课程', 403)
     if (data.studentIds.some(id => !occurrence.studentIds.includes(id))) fail('点名名单只能包含正式课程学生')
     const [studentRows] = await conn.execute(`SELECT id, name FROM students WHERE id IN (${data.studentIds.map(() => '?').join(',')})`, data.studentIds)

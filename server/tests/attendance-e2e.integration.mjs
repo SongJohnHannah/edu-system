@@ -82,22 +82,31 @@ try {
   await form.getByRole('button', { name: /确认点名/ }).click()
   const confirm = page.locator('.modal').filter({ has: page.getByRole('heading', { name: '确认点名' }) })
   await confirm.getByText('以下学生课时不足').waitFor({ state: 'visible' })
+  const hours = confirm.getByRole('spinbutton', { name: '本次扣除课时' })
+  assert.equal(await hours.inputValue(), '1.5')
+  await confirm.getByRole('button', { name: '增加 0.5 课时' }).click()
+  assert.equal(await hours.inputValue(), '2')
+  await hours.fill('2.5')
   await confirm.getByRole('button', { name: '确认点名' }).click()
   await page.locator('.history-item').getByText('出勤: 学生甲、学生乙').waitFor({ state: 'visible' })
-  const [recordRows] = await pool.execute('SELECT id, student_ids FROM attendance WHERE course_id = ?', ['course-1'])
+  await page.locator('.history-item').getByText('扣除 2.5 课时/人').waitFor()
+  const [recordRows] = await pool.execute('SELECT id, student_ids, hours_deducted FROM attendance WHERE course_id = ?', ['course-1'])
   assert.equal(recordRows.length, 1)
   const id = recordRows[0].id
   const ids = value => typeof value === 'string' ? JSON.parse(value) : value
   assert.deepEqual(ids(recordRows[0].student_ids), ['student-1', 'student-2'])
+  assert.equal(Number(recordRows[0].hours_deducted), 2.5)
+  const [deductions] = await pool.execute("SELECT hours FROM hour_records WHERE related_id = ? AND type = 'deduct' ORDER BY student_id", [id])
+  assert.deepEqual(deductions.map(row => Number(row.hours)), [2.5, 2.5])
   const balances = async () => (await pool.execute('SELECT id, used_hours FROM students ORDER BY id'))[0].map(row => Number(row.used_hours))
-  assert.deepEqual(await balances(), [2.5, 1.5])
+  assert.deepEqual(await balances(), [3.5, 2.5])
   const staleSelection = await fetch(`${base}/edusystem/api/attendance/${id}/remove-students`, {
     method: 'POST', headers: { Authorization: `Bearer ${login.accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ studentIds: ['student-1', 'missing-student'] })
   })
   assert.equal(staleSelection.status, 409)
   assert.match((await staleSelection.json()).error, /刷新后重试/)
-  assert.deepEqual(await balances(), [2.5, 1.5])
+  assert.deepEqual(await balances(), [3.5, 2.5])
   assert.deepEqual(ids((await pool.execute('SELECT student_ids FROM attendance WHERE id = ?', [id]))[0][0].student_ids), ['student-1', 'student-2'])
   assert.equal((await pool.execute('SELECT COUNT(*) AS total FROM attendance_reversals WHERE attendance_id = ?', [id]))[0][0].total, 0)
 
@@ -106,7 +115,7 @@ try {
   await reverse.locator('.delete-student-item').filter({ hasText: '学生甲' }).locator('input').check()
   await reverse.getByRole('button', { name: /确认撤销/ }).click()
   await page.locator('.history-item').getByText('出勤: 学生乙').waitFor({ state: 'visible' })
-  assert.deepEqual(await balances(), [1, 1.5])
+  assert.deepEqual(await balances(), [1, 2.5])
   const [[partial]] = await pool.execute('SELECT student_ids, voided_at FROM attendance WHERE id = ?', [id])
   assert.deepEqual(ids(partial.student_ids), ['student-2'])
   assert.equal(partial.voided_at, null)
@@ -122,8 +131,21 @@ try {
   assert.deepEqual(reversals.map(row => row.student_id), ['student-1', 'student-2'])
   await page.getByRole('button', { name: '查看已撤销' }).click()
   await page.locator('.history-item').getByText('原出勤: 学生甲、学生乙').waitFor({ state: 'visible' })
+  const [[course]] = await pool.execute('SELECT hours_per_class FROM courses WHERE id = ?', ['course-1'])
+  assert.equal(Number(course.hours_per_class), 1.5)
+  await form.getByRole('button', { name: '全选', exact: true }).click()
+  await form.getByRole('button', { name: /确认点名/ }).click()
+  assert.equal(await hours.inputValue(), '1.5', 'the next attendance starts from the unchanged course default')
+  await confirm.getByRole('button', { name: '取消', exact: true }).click()
+  const defaultResponse = await fetch(`${base}/edusystem/api/attendance`, {
+    method: 'POST', headers: { Authorization: `Bearer ${login.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ courseId: 'course-1', originalDate: date, date, studentIds: ['student-1', 'student-2'] })
+  })
+  assert.equal(defaultResponse.status, 201)
+  assert.equal((await defaultResponse.json()).hoursDeducted, 1.5)
+  assert.deepEqual(await balances(), [2.5, 1.5])
   assert.deepEqual(errors, [])
-  process.stdout.write('isolated attendance browser API passed: create, partial reversal, full reversal, balances, history\n')
+  process.stdout.write('isolated attendance browser API passed: custom/default deductions, partial/full reversal, balances, hour records, history\n')
 } catch (error) {
   process.exitCode = 1
   throw error
