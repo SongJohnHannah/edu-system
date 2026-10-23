@@ -1,6 +1,6 @@
 import pool from '../config/database.js'
 import { generateId } from '../utils/helpers.js'
-import { formatDateTime } from '../utils/dateFormat.js'
+import { formatDate, formatDateTime } from '../utils/dateFormat.js'
 import { acquireScheduleLock, releaseScheduleLock, closeScheduleConnection, futureTrialWindow } from './scheduleService.js'
 
 async function acquireStudentIdentityLock(conn) {
@@ -57,6 +57,15 @@ function normalizedAge(value) {
   return age
 }
 
+function normalizedEnrollmentDate(value) {
+  if (value === null || value === undefined || value === '') return null
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && value >= '1000-01-01') {
+    const date = new Date(`${value}T00:00:00Z`)
+    if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value) return value
+  }
+  throw Object.assign(new Error('入学时间须为有效日期（YYYY-MM-DD）'), { status: 400 })
+}
+
 function formatStudent(row) {
   const student = { ...row }
   delete student.class_id
@@ -67,6 +76,7 @@ function formatStudent(row) {
     createdBy: row.created_by,
     creatorId: row.creator_id,
     enrollmentStage: row.enrollment_stage,
+    enrollmentDate: formatDate(row.enrollment_date) || null,
     isTest: !!row.is_test,
     createdAt: formatDateTime(row.created_at),
     updatedAt: formatDateTime(row.updated_at)
@@ -115,6 +125,7 @@ export async function create(data) {
   const age = normalizedAge(data.age)
   const totalHours = initialHours(data.totalHours)
   const enrollmentStage = initialEnrollmentStage(data.enrollmentStage)
+  const enrollmentDate = normalizedEnrollmentDate(data.enrollmentDate)
   const conn = await pool.getConnection()
   let identityLocked = false
   try {
@@ -131,10 +142,10 @@ export async function create(data) {
 
     const id = generateId()
     await conn.execute(
-      `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, created_by, creator_id, is_test, enrollment_stage)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
+      `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, created_by, creator_id, is_test, enrollment_stage, enrollment_date)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?, ?)`,
       [id, name, phone, age, data.remark || '', totalHours,
-       data.createdBy || 'admin', data.creatorId || null, data.isTest ? 1 : 0, enrollmentStage]
+       data.createdBy || 'admin', data.creatorId || null, data.isTest ? 1 : 0, enrollmentStage, enrollmentDate]
     )
     const [rows] = await conn.execute('SELECT * FROM students WHERE id = ?', [id])
     const result = formatStudent(rows[0])
@@ -166,6 +177,7 @@ export async function update(id, data) {
     if (!name) throw Object.assign(new Error('请输入学生姓名'), { status: 400 })
     assertStudentFieldLengths(name, phone)
     const age = data.age === undefined ? s.age : normalizedAge(data.age)
+    const enrollmentDate = data.enrollmentDate === undefined ? (s.enrollment_date ?? null) : normalizedEnrollmentDate(data.enrollmentDate)
     if (data.status !== undefined && !['active', 'quit'].includes(data.status)) {
       throw Object.assign(new Error('无效的学生状态'), { status: 400 })
     }
@@ -210,10 +222,10 @@ export async function update(id, data) {
     }
 
     await conn.execute(
-      'UPDATE students SET name = ?, phone = ?, age = ?, remark = ?, status = ?, enrollment_stage = ? WHERE id = ?',
+      'UPDATE students SET name = ?, phone = ?, age = ?, remark = ?, status = ?, enrollment_stage = ?, enrollment_date = ? WHERE id = ?',
       [name, phone, age,
         data.remark !== undefined ? data.remark : s.remark, data.status ?? s.status,
-        nextStage, id]
+        nextStage, enrollmentDate, id]
     )
     const [rows] = await conn.execute('SELECT * FROM students WHERE id = ?', [id])
     const result = formatStudent(rows[0])
@@ -358,7 +370,8 @@ export async function addBatch(studentList, defaultHours, createdBy = 'admin', c
     name: String(student.name ?? '').trim(),
     phone: normalizedPhone(student.phone),
     totalHours: initialHours(student.totalHours ?? normalizedDefaultHours),
-    enrollmentStage: initialEnrollmentStage(student.enrollmentStage)
+    enrollmentStage: initialEnrollmentStage(student.enrollmentStage),
+    enrollmentDate: normalizedEnrollmentDate(student.enrollmentDate)
   })).filter(student => student.name)
   if (!prepared.length) throw Object.assign(new Error('请至少填写一个学生姓名'), { status: 400 })
   for (const student of prepared) {
@@ -389,10 +402,10 @@ export async function addBatch(studentList, defaultHours, createdBy = 'admin', c
       }
       const id = generateId()
       await conn.execute(
-        `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, created_by, creator_id, is_test, enrollment_stage)
-         VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?)`,
+        `INSERT INTO students (id, name, phone, age, remark, total_hours, used_hours, status, created_by, creator_id, is_test, enrollment_stage, enrollment_date)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?, ?, ?, ?)`,
         [id, name, student.phone || '', student.age ?? null, student.remark || '', student.totalHours,
-         createdBy, creatorId, student.isTest ? 1 : 0, student.enrollmentStage]
+         createdBy, creatorId, student.isTest ? 1 : 0, student.enrollmentStage, student.enrollmentDate]
       )
       addedCount++
     }

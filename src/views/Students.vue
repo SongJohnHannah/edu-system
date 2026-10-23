@@ -55,6 +55,7 @@
               剩余课时
               <span class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
             </th>
+            <th>入学时间</th>
             <th>状态</th>
             <th>操作</th>
           </tr>
@@ -69,6 +70,7 @@
             <td>{{ student.totalHours }}</td>
             <td>{{ student.usedHours || 0 }}</td>
             <td>{{ (student.totalHours || 0) - (student.usedHours || 0) }}</td>
+            <td class="enrollment-date">{{ student.enrollmentDate || '未填写' }}</td>
             <td>
               <div class="status-badges">
                 <span class="badge" :class="getStudentStatusClass(student)" @click="student.status !== 'deleted' && canEdit(student) && openStatusMenu(student)">
@@ -117,6 +119,7 @@
             </span>
           </div>
         </div>
+        <div class="mobile-enrollment-date">入学时间：{{ student.enrollmentDate || '未填写' }}</div>
         <div class="mobile-card-actions">
           <template v-if="student.status !== 'deleted'">
             <OfficeButton v-if="canEdit(student)" class="btn btn-text" @click="openAddHoursModal(student)">加减课</OfficeButton>
@@ -140,7 +143,24 @@
       </div>
     </div>
 
-    <OfficeModal v-model:show="showStudentDetail"><div class="modal"><h2 class="modal-title">学生详情</h2><template v-if="detailStudent"><p>{{ detailStudent.name }} · {{ detailStudent.age || '未填写年龄' }}</p><p>电话：{{ detailStudent.phone || '未填写' }}</p><p>录入人：{{ creatorName(detailStudent) }}</p><p>{{ getStudentStatusText(detailStudent) }} · {{ detailStudent.enrollmentStage === 'pending' ? '待报名' : '已报名' }}</p><p>备注：{{ detailStudent.remark || '无' }}</p><p>总课时 {{ detailStudent.totalHours }} · 已用 {{ detailStudent.usedHours }}</p><div class="modal-actions"><OfficeButton class="btn btn-secondary" @click="detailStudent = null">关闭</OfficeButton><OfficeButton class="btn btn-primary" @click="goToHistory(detailStudent.id)">课时历史</OfficeButton></div></template></div></OfficeModal>
+    <OfficeModal v-model:show="showStudentDetail">
+      <div class="modal">
+        <h2 class="modal-title">学生详情</h2>
+        <template v-if="detailStudent">
+          <p>{{ detailStudent.name }} · {{ detailStudent.age || '未填写年龄' }}</p>
+          <p>电话：{{ detailStudent.phone || '未填写' }}</p>
+          <p>入学时间：{{ detailStudent.enrollmentDate || '未填写' }}</p>
+          <p>录入人：{{ creatorName(detailStudent) }}</p>
+          <p>{{ getStudentStatusText(detailStudent) }} · {{ detailStudent.enrollmentStage === 'pending' ? '待报名' : '已报名' }}</p>
+          <p>备注：{{ detailStudent.remark || '无' }}</p>
+          <p>总课时 {{ detailStudent.totalHours }} · 已用 {{ detailStudent.usedHours }}</p>
+          <div class="modal-actions">
+            <OfficeButton class="btn btn-secondary" @click="detailStudent = null">关闭</OfficeButton>
+            <OfficeButton class="btn btn-primary" @click="goToHistory(detailStudent.id)">课时历史</OfficeButton>
+          </div>
+        </template>
+      </div>
+    </OfficeModal>
     <!-- 添加/编辑弹窗 -->
     <OfficeModal v-model:show="showModal" @update:show="value => { if (!value) { closeModal() } }">
       <div class="modal">
@@ -157,6 +177,10 @@
           <div class="form-group">
             <label>联系电话</label>
             <OfficeInput type="tel" class="input" v-model="form.phone" maxlength="20" placeholder="请输入家长联系电话" />
+          </div>
+          <div class="form-group">
+            <label>入学时间</label>
+            <OfficeDatePicker v-model="form.enrollmentDate" clearable aria-label="入学时间" placeholder="请选择入学日期" />
           </div>
           <div class="form-group">
             <label>{{ editingStudent ? '初始课时' : '初始课时 *' }}</label>
@@ -327,6 +351,7 @@ import { getStudents, getTeachers, addStudent, updateStudent, deleteStudent, res
 import { useToast } from '../composables/useToast'
 import { useAuthStore } from '../stores/auth.js'
 import { NSelect } from 'naive-ui'
+import OfficeDatePicker from '../components/OfficeDatePicker.vue'
 
 const router = useRouter()
 const toast = useToast()
@@ -380,8 +405,9 @@ const form = ref({
   phone: '',
   age: null,
   totalHours: 0,
-  remark: ''
-  ,enrollmentStage: 'enrolled'
+  remark: '',
+  enrollmentStage: 'enrolled',
+  enrollmentDate: ''
 })
 
 const batchRows = ref([{ name: '', age: null }])
@@ -493,14 +519,14 @@ function getHoursStatusText(student) {
 
 function openAddModal() {
   editingStudent.value = null
-  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '', enrollmentStage: 'enrolled' }
+  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '', enrollmentStage: 'enrolled', enrollmentDate: '' }
   showModal.value = true
 }
 
 function editStudent(student) {
   if (!canEdit(student)) return
   editingStudent.value = student
-  form.value = { ...student }
+  form.value = { ...student, enrollmentDate: student.enrollmentDate || '' }
   showModal.value = true
 }
 
@@ -528,8 +554,8 @@ async function saveStudent() {
     }
 
     if (editingStudent.value) {
-      const { name, phone, age, remark, status, enrollmentStage } = form.value
-      upsertStudent(await updateStudent(editingStudent.value.id, { name, phone, age, remark, status, enrollmentStage }))
+      const { name, phone, age, remark, status, enrollmentStage, enrollmentDate } = form.value
+      upsertStudent(await updateStudent(editingStudent.value.id, { name, phone, age, remark, status, enrollmentStage, enrollmentDate }))
     } else {
       upsertStudent(await addStudent(form.value))
     }
@@ -579,7 +605,7 @@ function restoreArchivedStudent(student) {
 function closeModal() {
   showModal.value = false
   editingStudent.value = null
-  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '', enrollmentStage: 'enrolled' }
+  form.value = { name: '', phone: '', age: null, totalHours: 0, remark: '', enrollmentStage: 'enrolled', enrollmentDate: '' }
 }
 
 // 批量添加
@@ -810,6 +836,8 @@ function goToHistory(studentId) {
 }
 .table th, .table td { padding-inline: 10px; }
 .table th:nth-child(5), .table td:nth-child(5) { white-space: nowrap; }
+.enrollment-date { white-space: nowrap; }
+.mobile-enrollment-date { padding: 0 14px 8px; color: var(--color-text-secondary); font-size: 12px; }
 
 .empty-state {
   text-align: center;

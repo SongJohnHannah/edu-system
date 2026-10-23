@@ -202,7 +202,7 @@ test('student phone checks trim input and detect legacy numbers with surrounding
         return [{ affectedRows: 1 }]
       }
       if (sql.startsWith('UPDATE students SET name =')) {
-        Object.assign(rows.find(row => row.id === params[6]), { name: params[0], phone: params[1] })
+        Object.assign(rows.find(row => row.id === params.at(-1)), { name: params[0], phone: params[1] })
         return [{ affectedRows: 1 }]
       }
       throw new Error(`Unexpected SQL: ${sql}`)
