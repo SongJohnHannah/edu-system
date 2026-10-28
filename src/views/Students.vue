@@ -56,6 +56,7 @@
               <span class="sort-icon">{{ sortOrder === 'asc' ? '↑' : '↓' }}</span>
             </th>
             <th>入学时间</th>
+            <th title="按当前月份与入学月份之差计算">已入学月数</th>
             <th>状态</th>
             <th>操作</th>
           </tr>
@@ -71,6 +72,7 @@
             <td>{{ student.usedHours || 0 }}</td>
             <td>{{ (student.totalHours || 0) - (student.usedHours || 0) }}</td>
             <td class="enrollment-date">{{ student.enrollmentDate || '未填写' }}</td>
+            <td class="enrollment-months">{{ enrollmentMonthsText(student) }}</td>
             <td>
               <div class="status-badges">
                 <span class="badge" :class="getStudentStatusClass(student)" @click="student.status !== 'deleted' && canEdit(student) && openStatusMenu(student)">
@@ -119,7 +121,10 @@
             </span>
           </div>
         </div>
-        <div class="mobile-enrollment-date">入学时间：{{ student.enrollmentDate || '未填写' }}</div>
+        <div class="mobile-enrollment-date">
+          <span>入学时间：{{ student.enrollmentDate || '未填写' }}</span>
+          <span class="enrollment-months">已入学月数：{{ enrollmentMonthsText(student) }}</span>
+        </div>
         <div class="mobile-card-actions">
           <template v-if="student.status !== 'deleted'">
             <OfficeButton v-if="canEdit(student)" class="btn btn-text" @click="openAddHoursModal(student)">加减课</OfficeButton>
@@ -150,6 +155,7 @@
           <p>{{ detailStudent.name }} · {{ detailStudent.age || '未填写年龄' }}</p>
           <p>电话：{{ detailStudent.phone || '未填写' }}</p>
           <p>入学时间：{{ detailStudent.enrollmentDate || '未填写' }}</p>
+          <p>已入学月数：{{ enrollmentMonthsText(detailStudent) }}</p>
           <p>录入人：{{ creatorName(detailStudent) }}</p>
           <p>{{ getStudentStatusText(detailStudent) }} · {{ detailStudent.enrollmentStage === 'pending' ? '待报名' : '已报名' }}</p>
           <p>备注：{{ detailStudent.remark || '无' }}</p>
@@ -352,6 +358,7 @@ import { useToast } from '../composables/useToast'
 import { useAuthStore } from '../stores/auth.js'
 import { NSelect } from 'naive-ui'
 import OfficeDatePicker from '../components/OfficeDatePicker.vue'
+import { getEnrollmentMonths } from '../utils/studentEnrollment.js'
 
 const router = useRouter()
 const toast = useToast()
@@ -382,6 +389,14 @@ function canArchive(student) { return isAdmin.value || !!auth.teacherId && stude
 function canRestore(student) { return student.status === 'deleted' && canArchive(student) }
 function creatorName(student) { return student.createdBy === 'admin' ? '管理员' : (teachers.value.find(t => t.id === student.creatorId)?.name || '原录入教师') }
 const students = ref([])
+const currentDate = ref(new Date())
+const enrollmentMonths = computed(() => new Map(students.value.map(student => [
+  student.id, getEnrollmentMonths(student.enrollmentDate, currentDate.value)
+])))
+function enrollmentMonthsText(student) {
+  const months = enrollmentMonths.value.get(student.id)
+  return months == null ? '未填写' : `${months} 个月`
+}
 const loading = ref(true)
 const loadError = ref(false)
 const searchText = ref('')
@@ -450,10 +465,28 @@ async function loadData() {
 onMounted(loadData)
 
 function handleVisibilityChange() {
-  if (document.visibilityState === 'visible') loadData()
+  if (document.visibilityState === 'visible') {
+    scheduleEnrollmentRefresh()
+    loadData()
+  }
 }
-onMounted(() => document.addEventListener('visibilitychange', handleVisibilityChange))
-onUnmounted(() => { loadRequest++; document.removeEventListener('visibilitychange', handleVisibilityChange) })
+let enrollmentRefreshTimer
+function scheduleEnrollmentRefresh() {
+  clearTimeout(enrollmentRefreshTimer)
+  const now = new Date()
+  currentDate.value = now
+  const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+  enrollmentRefreshTimer = setTimeout(scheduleEnrollmentRefresh, nextMidnight - now + 50)
+}
+onMounted(() => {
+  scheduleEnrollmentRefresh()
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
+onUnmounted(() => {
+  loadRequest++
+  clearTimeout(enrollmentRefreshTimer)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+})
 
 const archivedCount = computed(() => students.value.filter(student => student.status === 'deleted').length)
 const filteredStudents = computed(() => {
@@ -836,8 +869,8 @@ function goToHistory(studentId) {
 }
 .table th, .table td { padding-inline: 10px; }
 .table th:nth-child(5), .table td:nth-child(5) { white-space: nowrap; }
-.enrollment-date { white-space: nowrap; }
-.mobile-enrollment-date { padding: 0 14px 8px; color: var(--color-text-secondary); font-size: 12px; }
+.enrollment-date, .enrollment-months { white-space: nowrap; }
+.mobile-enrollment-date { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 14px 8px; color: var(--color-text-secondary); font-size: 12px; }
 
 .empty-state {
   text-align: center;
